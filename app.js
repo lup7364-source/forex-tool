@@ -100,6 +100,7 @@ async function buscarVela() {
     `O:${data.open} H:${data.high} L:${data.low} C:${data.close}`;
 
   resultado.style.display = "block";
+  dibujarGraficoAlrededorDe(data);
 }
 
 async function marcarPunto(direccion, tipo) {
@@ -124,7 +125,82 @@ async function marcarPunto(direccion, tipo) {
   mensajeMarcado.textContent = `Vela marcada como "${direccion.toUpperCase()} ${tipo === "bueno" ? "O" : "X"}" correctamente.`;
 }
 
-function llenarSelectHoras() {
+let chart = null;
+let serieVelas = null;
+
+function inicializarChart() {
+  if (chart) return; // ya existe, no crear otro
+
+  chart = LightweightCharts.createChart(document.getElementById("chart"), {
+    height: 260,
+    layout: {
+      background: { color: "#FFFFFF" },
+      textColor: "#222222",
+    },
+    grid: {
+      vertLines: { color: "#EAEAEA" },
+      horzLines: { color: "#EAEAEA" },
+    },
+    timeScale: { timeVisible: true, secondsVisible: false },
+    rightPriceScale: { borderColor: "#CCCCCC" },
+  });
+
+  serieVelas = chart.addCandlestickSeries({
+    upColor: "#FFFFFF",
+    downColor: "#000000",
+    borderUpColor: "#000000",
+    borderDownColor: "#000000",
+    wickUpColor: "#000000",
+    wickDownColor: "#000000",
+  });
+}
+
+async function dibujarGraficoAlrededorDe(vela) {
+  inicializarChart();
+
+  const RANGO_VELAS = 40; // velas antes y después
+  const MS_POR_VELA = 15 * 60 * 1000; // M15
+
+  const centro = new Date(vela.timestamp);
+  const desde = new Date(centro.getTime() - RANGO_VELAS * MS_POR_VELA).toISOString();
+  const hasta = new Date(centro.getTime() + RANGO_VELAS * MS_POR_VELA).toISOString();
+
+  const { data, error } = await supabaseClient
+    .from("candles")
+    .select("timestamp, open, high, low, close")
+    .eq("symbol", vela.symbol)
+    .eq("timeframe", vela.timeframe)
+    .gte("timestamp", desde)
+    .lte("timestamp", hasta)
+    .order("timestamp", { ascending: true });
+
+  if (error) {
+    console.error("Error cargando el gráfico:", error);
+    return;
+  }
+
+  const datos = data.map((c) => {
+    const esLaVelaBuscada = c.timestamp === vela.timestamp;
+    const punto = {
+      time: Math.floor(new Date(c.timestamp).getTime() / 1000),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    };
+
+    if (esLaVelaBuscada) {
+      punto.color = "#F5C518";
+      punto.borderColor = "#F5C518";
+      punto.wickColor = "#F5C518";
+    }
+
+    return punto;
+  });
+
+  serieVelas.setData(datos);
+  chart.timeScale().fitContent();
+}
   const select = document.getElementById("hora");
   for (let h = 0; h < 24; h++) {
     const valor = String(h).padStart(2, "0");
