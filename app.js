@@ -201,6 +201,7 @@ async function dibujarGraficoAlrededorDe(vela) {
   serieVelas.setData(datos);
   chart.timeScale().fitContent();
 }
+function llenarSelectHoras() {
   const select = document.getElementById("hora");
   for (let h = 0; h < 24; h++) {
     const valor = String(h).padStart(2, "0");
