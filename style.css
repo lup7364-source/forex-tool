@@ -92,9 +92,15 @@ h3 { font-size: 14px; }
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 
-.field-row { display: flex; gap: 10px; }
-.field-row .field { flex: 1; margin-bottom: 14px; }
+.field-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.field-row .field { flex: 1; margin-bottom: 14px; min-width: 0; }
 .field-sm { flex: 0 0 78px; }
+
+@media (max-width: 480px) {
+  .field-row .field:not(.field-sm) {
+    flex-basis: 100%;
+  }
+}
 
 label {
   font-size: 12px;
