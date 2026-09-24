@@ -9,7 +9,21 @@
   <h1>Forex Tool</h1>
   <div id="status">Conectando...</div>
 
-  <section id="buscador">
+  <section id="login">
+    <h2>Iniciar sesión</h2>
+    <label>Correo:
+      <input type="email" id="email">
+    </label>
+    <label>Contraseña:
+      <input type="password" id="password">
+    </label>
+    <button id="btnLogin">Entrar</button>
+    <p id="mensajeLogin"></p>
+  </section>
+
+  <button id="btnLogout" style="display:none;">Cerrar sesión</button>
+
+  <section id="buscador" style="display:none;">
     <h2>Buscar vela</h2>
 
     <label>Símbolo:

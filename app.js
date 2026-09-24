@@ -6,16 +6,54 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 let velaActual = null; // guarda la vela encontrada mientras el usuario decide marcarla
 
 async function probarConexion() {
-  const { error } = await supabaseClient.from("candles").select("id").limit(1);
   const status = document.getElementById("status");
+  status.textContent = "Conectado a Supabase.";
+}
+
+async function manejarLogin() {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const mensajeLogin = document.getElementById("mensajeLogin");
+
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
   if (error) {
-    status.textContent = "Error de conexión: " + error.message;
-    console.error(error);
+    mensajeLogin.textContent = "Error: " + error.message;
     return;
   }
-  status.textContent = "Conectado a Supabase correctamente.";
+
+  mensajeLogin.textContent = "";
+  mostrarApp();
 }
+
+async function manejarLogout() {
+  await supabaseClient.auth.signOut();
+  mostrarLogin();
+}
+
+function mostrarApp() {
+  document.getElementById("login").style.display = "none";
+  document.getElementById("buscador").style.display = "block";
+  document.getElementById("btnLogout").style.display = "inline-block";
+}
+
+function mostrarLogin() {
+  document.getElementById("login").style.display = "block";
+  document.getElementById("buscador").style.display = "none";
+  document.getElementById("btnLogout").style.display = "none";
+}
+
+async function revisarSesion() {
+  const { data } = await supabaseClient.auth.getSession();
+  if (data.session) {
+    mostrarApp();
+  } else {
+    mostrarLogin();
+  }
+}
+
+document.getElementById("btnLogin").addEventListener("click", manejarLogin);
+document.getElementById("btnLogout").addEventListener("click", manejarLogout);
 
 async function buscarVela() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
@@ -225,4 +263,4 @@ document.getElementById("btnSellO").addEventListener("click", () => marcarPunto(
 document.getElementById("btnSellX").addEventListener("click", () => marcarPunto("sell", "malo"));
 document.getElementById("btnSimilar").addEventListener("click", buscarPuntoSimilar);
 
-probarConexion();
+revisarSesion();
