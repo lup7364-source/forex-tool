@@ -1,5 +1,5 @@
 const SUPABASE_URL = "https://zbndbecsqhzfmblgpgiw.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpibmRiZWNzcWh6Zm1ibGdwZ2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNDgwNDksImV4cCI6MjEwNTcyNDA0OX0.w8i7iYL8Hylmd178ad3jBdNhTuit6-XmNf8CcHZVnOI";
+const SUPABASE_ANON_KEY = "PEGA_AQUI_TU_ANON_KEY";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
