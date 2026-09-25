@@ -233,6 +233,83 @@ textarea { resize: vertical; }
 
 #chart { width: 100%; }
 
+.punto-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  font-size: 12.5px;
+}
+
+.punto-badge { font-weight: 600; flex: 0 0 auto; }
+.punto-fecha { color: var(--text-muted); flex: 1; }
+.punto-resultado { font-weight: 600; text-transform: capitalize; }
+
+.punto-exitoso { border-color: rgba(45,212,191,0.35); }
+.punto-exitoso .punto-resultado { color: var(--teal); }
+
+.punto-fallido { border-color: rgba(248,113,113,0.35); }
+.punto-fallido .punto-resultado { color: var(--rose); }
+
+.punto-pendiente .punto-resultado { color: var(--text-muted); }
+
+.overlay-page {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 100;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.overlay-page.abierto { display: block; }
+
+.overlay-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.variables-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.variable-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+.variable-card .v-nombre {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+
+.variable-card .v-valor {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-card-lg #chart, .chart-card-lg #chartDetalle { min-height: 380px; }
+
+@media (min-width: 640px) {
+  .wrap { max-width: 720px; }
+  .overlay-inner .candle-info { margin: 16px 0; }
+}
+
 /* ---------- Table ---------- */
 
 .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
