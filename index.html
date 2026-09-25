@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -125,12 +125,49 @@
           </div>
         </div>
       </div>
+      <div class="divider"></div>
+
+      <button id="btnVerPuntos" class="btn btn-secondary btn-block">Ver puntos marcados</button>
+
+      <div id="listaPuntos" class="reveal" style="display:none;">
+        <div class="score-row">
+          <span class="score-label">Exitosos</span>
+          <span id="totalExitosos" class="score-value" style="color:var(--teal);"></span>
+        </div>
+        <div class="score-row">
+          <span class="score-label">Fallidos</span>
+          <span id="totalFallidos" class="score-value" style="color:var(--rose);"></span>
+        </div>
+        <div class="score-row">
+          <span class="score-label">Pendientes</span>
+          <span id="totalPendientes" class="score-value"></span>
+        </div>
+
+        <div id="puntosContenedor"></div>
+      </div>
     </section>
 
   </main>
 
+  <div id="paginaDetalle" class="overlay-page">
+    <div class="overlay-inner">
+      <button id="btnCerrarDetalle" class="btn btn-ghost">‹ Volver</button>
+
+      <div class="candle-info">
+        <span class="candle-label">Detalle del punto</span>
+        <p id="infoVelaDetalle" class="candle-values"></p>
+      </div>
+
+      <div class="chart-card chart-card-lg">
+        <div id="chartDetalle"></div>
+      </div>
+
+      <div id="variablesVelaDetalle" class="variables-grid"></div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
