@@ -305,10 +305,55 @@ textarea { resize: vertical; }
 
 .chart-card-lg #chart, .chart-card-lg #chartDetalle { min-height: 380px; }
 
+.chart-card-sub {
+  padding: 4px;
+  margin-bottom: 10px;
+}
+
+.chart-card-sub #chartRSI,
+.chart-card-sub #chartATR,
+.chart-card-sub #chartVolume {
+  width: 100%;
+}
+
 @media (min-width: 640px) {
   .wrap { max-width: 720px; }
   .overlay-inner .candle-info { margin: 16px 0; }
 }
+
+.indicadores-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.indicadores-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.indicadores-row input { accent-color: var(--teal); }
+
+.similar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.similar-item:hover { border-color: var(--border-strong); }
+
+.similar-item .sim-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.similar-item .sim-pct { color: var(--teal); font-weight: 600; }
+.similar-item .sim-fecha { color: var(--text-muted); font-size: 12px; }
 
 /* ---------- Table ---------- */
 
