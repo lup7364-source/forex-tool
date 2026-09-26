@@ -932,7 +932,7 @@ function refrescarIndicadoresSimilares() {
   }
   if (document.getElementById("chkEMA21Similar").checked) {
     quitarIndicadorSimilar("EMA21");
-    agregarMediaMovilSimilar("EMA21", "EMA_21", "#8B5CF6");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "#355C7D");
   }
   if (document.getElementById("chkSMMA21Similar").checked) {
     quitarIndicadorSimilar("SMMA21");
