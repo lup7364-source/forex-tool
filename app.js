@@ -932,15 +932,15 @@ function refrescarIndicadoresSimilares() {
   }
   if (document.getElementById("chkEMA21Similar").checked) {
     quitarIndicadorSimilar("EMA21");
-    agregarMediaMovilSimilar("EMA21", "EMA_21", "#F472B6");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "#8B5CF6");
   }
   if (document.getElementById("chkSMMA21Similar").checked) {
     quitarIndicadorSimilar("SMMA21");
-    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#EF4444");
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#38BDF8");
   }
   if (document.getElementById("chkSMMA50Similar").checked) {
     quitarIndicadorSimilar("SMMA50");
-    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#F97316");
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#2DD4BF");
   }
   if (document.getElementById("chkSMMA200Similar").checked) {
     quitarIndicadorSimilar("SMMA200");
