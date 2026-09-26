@@ -403,6 +403,14 @@ async function verDetallePunto(candleId, resultado) {
   velaDetalleActual = data;
   limpiarIndicadores();
 
+  // Al abrir un nuevo punto, se limpia cualquier comparación/superposición
+  // que hubiera quedado activa del punto anterior.
+  quitarOverlayVelas();
+  ultimaComparacion = null;
+  document.getElementById("chkSuperponer").checked = false;
+  document.getElementById("comparacionContainer").style.display = "none";
+  document.getElementById("resultadoSimilaresGlobal").style.display = "none";
+
   document.getElementById("infoVelaDetalle").textContent =
     `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ${resultado || "sin evaluar"}`;
 
@@ -521,7 +529,7 @@ function agregarBB() {
   indicadoresActivos.BB = [up, mid, dw];
 }
 
-function crearOReusarSubChart(containerId, tipoSerie, colorSerie) {
+function crearOReusarSubChart(containerId, tipoSerie, colorSerie, priceFormat) {
   if (chartsPorContenedor[containerId]) return chartsPorContenedor[containerId];
 
   const chart = LightweightCharts.createChart(document.getElementById(containerId), {
@@ -532,10 +540,15 @@ function crearOReusarSubChart(containerId, tipoSerie, colorSerie) {
     rightPriceScale: { borderColor: "#CCCCCC" },
   });
 
+  // priceFormat opcional: permite mostrar escalas con más decimales
+  // (por ejemplo el ATR, que en forex suele ser algo como 0.00035).
+  const opcionesSerie = { priceLineVisible: false };
+  if (priceFormat) opcionesSerie.priceFormat = priceFormat;
+
   const serie =
     tipoSerie === "histogram"
-      ? chart.addHistogramSeries({ color: colorSerie, priceLineVisible: false })
-      : chart.addLineSeries({ color: colorSerie, lineWidth: 1, priceLineVisible: false });
+      ? chart.addHistogramSeries({ color: colorSerie, ...opcionesSerie })
+      : chart.addLineSeries({ color: colorSerie, lineWidth: 1, ...opcionesSerie });
 
   chartsPorContenedor[containerId] = { chart, serie };
   return chartsPorContenedor[containerId];
@@ -551,7 +564,12 @@ function agregarRSI() {
 
 function agregarATR() {
   document.getElementById("cardATR").style.display = "block";
-  const { chart, serie } = crearOReusarSubChart("chartATR", "line", "#A78BFA");
+  // Escala con 5 decimales (tipo 0.00035) para que el ATR se lea bien.
+  const { chart, serie } = crearOReusarSubChart("chartATR", "line", "#A78BFA", {
+    type: "price",
+    precision: 5,
+    minMove: 0.00001,
+  });
   serie.setData(datosSerieIndicador("ATR", true));
   serie.setMarkers(marcadorAmarillo());
   chart.timeScale().fitContent();
@@ -586,8 +604,14 @@ function quitarIndicador(nombre) {
 
 function limpiarIndicadores() {
   for (const nombre of Object.keys(indicadoresActivos)) quitarIndicador(nombre);
+  for (const nombre of Object.keys(indicadoresActivosSimilar)) quitarIndicadorSimilar(nombre);
   ["cardRSI", "cardATR", "cardVolume"].forEach(ocultarSubChart);
   ["chkBB", "chkRSI", "chkATR", "chkVolume", "chkEMA21", "chkSMMA21", "chkSMMA50", "chkSMMA200"].forEach((id) => {
+    document.getElementById(id).checked = false;
+  });
+  [
+    "chkBBSimilar", "chkEMA21Similar", "chkSMMA21Similar", "chkSMMA50Similar", "chkSMMA200Similar",
+  ].forEach((id) => {
     document.getElementById(id).checked = false;
   });
 }
@@ -595,15 +619,18 @@ function limpiarIndicadores() {
 document.getElementById("chkBB").addEventListener("change", (e) =>
   e.target.checked ? agregarBB() : quitarIndicador("BB")
 );
-document.getElementById("chkRSI").addEventListener("change", (e) =>
-  e.target.checked ? agregarRSI() : ocultarSubChart("cardRSI")
-);
-document.getElementById("chkATR").addEventListener("change", (e) =>
-  e.target.checked ? agregarATR() : ocultarSubChart("cardATR")
-);
-document.getElementById("chkVolume").addEventListener("change", (e) =>
-  e.target.checked ? agregarVolume() : ocultarSubChart("cardVolume")
-);
+document.getElementById("chkRSI").addEventListener("change", (e) => {
+  if (e.target.checked) agregarRSI();
+  actualizarCardRSI();
+});
+document.getElementById("chkATR").addEventListener("change", (e) => {
+  if (e.target.checked) agregarATR();
+  actualizarCardATR();
+});
+document.getElementById("chkVolume").addEventListener("change", (e) => {
+  if (e.target.checked) agregarVolume();
+  actualizarCardVolume();
+});
 document.getElementById("chkEMA21").addEventListener("change", (e) =>
   e.target.checked ? agregarMediaMovil("EMA21", "EMA_21", "#38BDF8") : quitarIndicador("EMA21")
 );
@@ -616,6 +643,49 @@ document.getElementById("chkSMMA50").addEventListener("change", (e) =>
 document.getElementById("chkSMMA200").addEventListener("change", (e) =>
   e.target.checked ? agregarMediaMovil("SMMA200", "SMMA_200", "#C084FC") : quitarIndicador("SMMA200")
 );
+
+// ---------- Los mismos indicadores, pero para el punto similar (en colores distintos) ----------
+
+document.getElementById("chkBBSimilar").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    if (!requiereComparacionActiva(e.target)) return;
+    agregarBBSimilar();
+  } else {
+    quitarIndicadorSimilar("BB");
+  }
+});
+document.getElementById("chkEMA21Similar").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    if (!requiereComparacionActiva(e.target)) return;
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "#F472B6");
+  } else {
+    quitarIndicadorSimilar("EMA21");
+  }
+});
+document.getElementById("chkSMMA21Similar").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    if (!requiereComparacionActiva(e.target)) return;
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#EF4444");
+  } else {
+    quitarIndicadorSimilar("SMMA21");
+  }
+});
+document.getElementById("chkSMMA50Similar").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    if (!requiereComparacionActiva(e.target)) return;
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#F97316");
+  } else {
+    quitarIndicadorSimilar("SMMA50");
+  }
+});
+document.getElementById("chkSMMA200Similar").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    if (!requiereComparacionActiva(e.target)) return;
+    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "#A855F7");
+  } else {
+    quitarIndicadorSimilar("SMMA200");
+  }
+});
 
 // ---------- Búsqueda de puntos similares en TODA la base de datos ----------
 
@@ -745,9 +815,140 @@ function serieRelativaPrecioNormalizado(rango, velaCentro) {
   }));
 }
 
+// Alinea las velas de un candidato ("B") sobre el eje de tiempo real del
+// gráfico principal ("A"), usando la posición relativa a cada vela central,
+// para poder dibujarlas como una serie de velas superpuesta y semitransparente.
+function datosVelasSuperpuestas(rangoA, velaCentroA, rangoB, velaCentroB) {
+  const centroIdxA = rangoA.findIndex((c) => c.timestamp === velaCentroA.timestamp);
+  const centroIdxB = rangoB.findIndex((c) => c.timestamp === velaCentroB.timestamp);
+  if (centroIdxA === -1 || centroIdxB === -1) return [];
+
+  const antes = Math.min(centroIdxA, centroIdxB);
+  const despues = Math.min(rangoA.length - 1 - centroIdxA, rangoB.length - 1 - centroIdxB);
+
+  const datos = [];
+  for (let offset = -antes; offset <= despues; offset++) {
+    const a = rangoA[centroIdxA + offset];
+    const b = rangoB[centroIdxB + offset];
+    if (!a || !b) continue;
+    datos.push({
+      time: Math.floor(new Date(a.timestamp).getTime() / 1000),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+    });
+  }
+  return datos;
+}
+
+// Alinea la variable de un rango "origen" (por ejemplo, el punto similar) sobre
+// el eje de tiempo real de un rango "referencia" (el gráfico principal), usando
+// la posición relativa a cada vela central. Así ambas líneas quedan en el mismo eje X.
+function datosSerieIndicadorAlineada(rangoOrigen, velaCentroOrigen, clave, esVariable, rangoRef, velaCentroRef) {
+  const centroIdxOrigen = rangoOrigen.findIndex((c) => c.timestamp === velaCentroOrigen.timestamp);
+  const centroIdxRef = rangoRef.findIndex((c) => c.timestamp === velaCentroRef.timestamp);
+  if (centroIdxOrigen === -1 || centroIdxRef === -1) return [];
+
+  const antes = Math.min(centroIdxOrigen, centroIdxRef);
+  const despues = Math.min(rangoOrigen.length - 1 - centroIdxOrigen, rangoRef.length - 1 - centroIdxRef);
+
+  const datos = [];
+  for (let offset = -antes; offset <= despues; offset++) {
+    const origen = rangoOrigen[centroIdxOrigen + offset];
+    const ref = rangoRef[centroIdxRef + offset];
+    if (!origen || !ref) continue;
+    datos.push({
+      time: Math.floor(new Date(ref.timestamp).getTime() / 1000),
+      value: esVariable ? origen.variables[clave] : origen[clave],
+    });
+  }
+  return datos;
+}
+
 const chartsComparacion = {};
 
-function crearChartComparacion(containerId) {
+let overlaySeriesDetalle = null; // serie de velas superpuestas sobre chartDetalle
+let ultimaComparacion = null;    // { candidata, rangoB } de la última comparación activada
+
+// Indicadores del punto similar (en rojo), dibujados sobre el gráfico principal
+// o sobre los sub-gráficos existentes (RSI/ATR/Volume).
+const indicadoresActivosSimilar = {};
+
+function quitarIndicadorSimilar(nombre) {
+  const info = indicadoresActivosSimilar[nombre];
+  if (!info) return;
+  const { chart } = chartsPorContenedor[info.containerId] || {};
+  if (chart) {
+    for (const serie of info.series) chart.removeSeries(serie);
+  }
+  delete indicadoresActivosSimilar[nombre];
+}
+
+function requiereComparacionActiva(checkboxEl) {
+  if (ultimaComparacion) return true;
+  checkboxEl.checked = false;
+  alert("Primero selecciona un punto similar (en 'Buscar puntos similares') para poder comparar sus indicadores.");
+  return false;
+}
+
+function agregarBBSimilar() {
+  const { chart } = chartsPorContenedor["chartDetalle"];
+  const up = chart.addLineSeries({ color: "#FCA5A5", lineWidth: 1, priceLineVisible: false });
+  const mid = chart.addLineSeries({ color: "#EF4444", lineWidth: 1, priceLineVisible: false });
+  const dw = chart.addLineSeries({ color: "#FCA5A5", lineWidth: 1, priceLineVisible: false });
+  up.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_UP", true, rangoVelasDetalle, velaDetalleActual));
+  mid.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_MID", true, rangoVelasDetalle, velaDetalleActual));
+  dw.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_DW", true, rangoVelasDetalle, velaDetalleActual));
+  indicadoresActivosSimilar.BB = { containerId: "chartDetalle", series: [up, mid, dw] };
+}
+
+function agregarMediaMovilSimilar(nombre, clave, color) {
+  const { chart } = chartsPorContenedor["chartDetalle"];
+  const serie = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false });
+  serie.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, clave, true, rangoVelasDetalle, velaDetalleActual));
+  indicadoresActivosSimilar[nombre] = { containerId: "chartDetalle", series: [serie] };
+}
+
+function actualizarCardRSI() {
+  document.getElementById("cardRSI").style.display = document.getElementById("chkRSI").checked ? "block" : "none";
+}
+
+function actualizarCardATR() {
+  document.getElementById("cardATR").style.display = document.getElementById("chkATR").checked ? "block" : "none";
+}
+
+function actualizarCardVolume() {
+  document.getElementById("cardVolume").style.display = document.getElementById("chkVolume").checked ? "block" : "none";
+}
+
+// Vuelve a dibujar, con los datos del nuevo candidato, todos los indicadores
+// del punto similar que ya estuvieran activados al cambiar de comparación.
+function refrescarIndicadoresSimilares() {
+  if (document.getElementById("chkSuperponer").checked) agregarOverlayVelas();
+  if (document.getElementById("chkBBSimilar").checked) {
+    quitarIndicadorSimilar("BB");
+    agregarBBSimilar();
+  }
+  if (document.getElementById("chkEMA21Similar").checked) {
+    quitarIndicadorSimilar("EMA21");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "#F472B6");
+  }
+  if (document.getElementById("chkSMMA21Similar").checked) {
+    quitarIndicadorSimilar("SMMA21");
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#EF4444");
+  }
+  if (document.getElementById("chkSMMA50Similar").checked) {
+    quitarIndicadorSimilar("SMMA50");
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#F97316");
+  }
+  if (document.getElementById("chkSMMA200Similar").checked) {
+    quitarIndicadorSimilar("SMMA200");
+    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "#A855F7");
+  }
+}
+
+function crearChartComparacion(containerId, priceFormat) {
   if (chartsComparacion[containerId]) return chartsComparacion[containerId];
 
   const chart = LightweightCharts.createChart(document.getElementById(containerId), {
@@ -759,18 +960,56 @@ function crearChartComparacion(containerId) {
     rightPriceScale: { borderColor: "#CCCCCC" },
   });
 
-  const serieActual = chart.addLineSeries({ color: "#2DD4BF", lineWidth: 2, priceLineVisible: false });
-  const serieComparada = chart.addLineSeries({ color: "#F59E0B", lineWidth: 2, priceLineVisible: false });
+  // priceFormat opcional: se usa para el ATR (5 decimales, tipo 0.00000).
+  const opcionesSerie = { lineWidth: 2, priceLineVisible: false };
+  if (priceFormat) opcionesSerie.priceFormat = priceFormat;
+
+  const serieActual = chart.addLineSeries({ color: "#2DD4BF", ...opcionesSerie });
+  const serieComparada = chart.addLineSeries({ color: "#F59E0B", ...opcionesSerie });
 
   chartsComparacion[containerId] = { chart, serieActual, serieComparada };
   return chartsComparacion[containerId];
 }
 
-function dibujarComparacionEn(containerId, datosActual, datosComparado) {
-  const { chart, serieActual, serieComparada } = crearChartComparacion(containerId);
+function dibujarComparacionEn(containerId, datosActual, datosComparado, priceFormat) {
+  const { chart, serieActual, serieComparada } = crearChartComparacion(containerId, priceFormat);
   serieActual.setData(datosActual);
   serieComparada.setData(datosComparado);
   chart.timeScale().fitContent();
+}
+
+// Dibuja las velas del punto similar sobre el gráfico principal (chartDetalle),
+// en colores más opacos, para comparar visualmente ambas formaciones.
+function agregarOverlayVelas() {
+  if (!ultimaComparacion || !velaDetalleActual) return;
+  quitarOverlayVelas();
+
+  const { chart } = chartsPorContenedor["chartDetalle"];
+  overlaySeriesDetalle = chart.addCandlestickSeries({
+    upColor: "rgba(245, 197, 24, 0.35)",
+    downColor: "rgba(45, 212, 191, 0.35)",
+    borderUpColor: "rgba(245, 197, 24, 0.6)",
+    borderDownColor: "rgba(45, 212, 191, 0.6)",
+    wickUpColor: "rgba(245, 197, 24, 0.5)",
+    wickDownColor: "rgba(45, 212, 191, 0.5)",
+    priceFormat: { type: "price", precision: 5, minMove: 0.00001 },
+  });
+
+  const datos = datosVelasSuperpuestas(
+    rangoVelasDetalle,
+    velaDetalleActual,
+    ultimaComparacion.rangoB,
+    ultimaComparacion.candidata
+  );
+  overlaySeriesDetalle.setData(datos);
+}
+
+function quitarOverlayVelas() {
+  const { chart } = chartsPorContenedor["chartDetalle"] || {};
+  if (chart && overlaySeriesDetalle) {
+    chart.removeSeries(overlaySeriesDetalle);
+    overlaySeriesDetalle = null;
+  }
 }
 
 async function activarComparacion(candleId, porcentaje) {
@@ -787,6 +1026,9 @@ async function activarComparacion(candleId, porcentaje) {
 
   const rangoA = rangoVelasDetalle;
   const rangoB = await traerRangoVelas(candidata);
+
+  ultimaComparacion = { candidata, rangoB };
+  refrescarIndicadoresSimilares();
 
   document.getElementById("comparacionContainer").style.display = "block";
   document.getElementById("infoComparacion").textContent =
@@ -810,7 +1052,8 @@ async function activarComparacion(candleId, porcentaje) {
   dibujarComparacionEn(
     "chartCompATR",
     serieRelativa(rangoA, velaDetalleActual, "ATR", true),
-    serieRelativa(rangoB, candidata, "ATR", true)
+    serieRelativa(rangoB, candidata, "ATR", true),
+    { type: "price", precision: 5, minMove: 0.00001 }
   );
 
   document.getElementById("comparacionContainer").scrollIntoView({ behavior: "smooth" });
@@ -818,6 +1061,25 @@ async function activarComparacion(candleId, porcentaje) {
 
 document.getElementById("btnQuitarComparacion").addEventListener("click", () => {
   document.getElementById("comparacionContainer").style.display = "none";
+  quitarOverlayVelas();
+  document.getElementById("chkSuperponer").checked = false;
+
+  for (const nombre of Object.keys(indicadoresActivosSimilar)) quitarIndicadorSimilar(nombre);
+  [
+    "chkBBSimilar", "chkEMA21Similar", "chkSMMA21Similar", "chkSMMA50Similar", "chkSMMA200Similar",
+  ].forEach((id) => {
+    document.getElementById(id).checked = false;
+  });
+
+  ultimaComparacion = null;
+});
+
+document.getElementById("chkSuperponer").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    agregarOverlayVelas();
+  } else {
+    quitarOverlayVelas();
+  }
 });
 
 document.getElementById("puntosContenedor").addEventListener("click", (evento) => {
