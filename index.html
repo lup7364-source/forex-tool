@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -82,6 +82,7 @@
         </div>
 
         <div class="chart-card">
+          <span class="chart-title">Vela buscada (contexto ±40 velas)</span>
           <div id="chart"></div>
         </div>
 
@@ -159,16 +160,20 @@
       </div>
 
       <div class="chart-card chart-card-lg">
+        <span class="chart-title">Vela seleccionada (contexto ±40 velas)</span>
         <div id="chartDetalle"></div>
       </div>
 
       <div id="cardRSI" class="chart-card chart-card-sub" style="display:none;">
+        <span class="chart-title">RSI</span>
         <div id="chartRSI"></div>
       </div>
       <div id="cardATR" class="chart-card chart-card-sub" style="display:none;">
+        <span class="chart-title">ATR</span>
         <div id="chartATR"></div>
       </div>
       <div id="cardVolume" class="chart-card chart-card-sub" style="display:none;">
+        <span class="chart-title">Volumen</span>
         <div id="chartVolume"></div>
       </div>
 
@@ -181,6 +186,12 @@
         <label><input type="checkbox" id="chkSMMA21"> SMMA 21</label>
         <label><input type="checkbox" id="chkSMMA50"> SMMA 50</label>
         <label><input type="checkbox" id="chkSMMA200"> SMMA 200</label>
+        <label><input type="checkbox" id="chkSuperponer"> Calco</label>
+        <label class="lbl-similar"><input type="checkbox" id="chkBBSimilar"> Bands</label>
+        <label class="lbl-similar"><input type="checkbox" id="chkEMA21Similar"> EMA 21</label>
+        <label class="lbl-similar"><input type="checkbox" id="chkSMMA21Similar"> SMMA 21</label>
+        <label class="lbl-similar"><input type="checkbox" id="chkSMMA50Similar"> SMMA 50</label>
+        <label class="lbl-similar"><input type="checkbox" id="chkSMMA200Similar"> SMMA 200</label>
       </div>
 
       <div id="variablesVelaDetalle" class="variables-grid"></div>
@@ -203,17 +214,30 @@
           <span id="infoComparacion" class="score-label"></span>
           <button id="btnQuitarComparacion" class="btn btn-ghost">Quitar comparación</button>
         </div>
+
         <p class="msg-loading" style="margin-bottom:10px;">Teal = vela actual · Ámbar = vela comparada · eje horizontal = velas antes/después del punto</p>
-        <div class="chart-card chart-card-sub"><div id="chartCompPrecio"></div></div>
-        <div class="chart-card chart-card-sub"><div id="chartCompRSI"></div></div>
-        <div class="chart-card chart-card-sub"><div id="chartCompVolume"></div></div>
-        <div class="chart-card chart-card-sub"><div id="chartCompATR"></div></div>
+        <div class="chart-card chart-card-sub">
+          <span class="chart-title">Precio (% relativo al punto)</span>
+          <div id="chartCompPrecio"></div>
+        </div>
+        <div class="chart-card chart-card-sub">
+          <span class="chart-title">RSI</span>
+          <div id="chartCompRSI"></div>
+        </div>
+        <div class="chart-card chart-card-sub">
+          <span class="chart-title">Volumen</span>
+          <div id="chartCompVolume"></div>
+        </div>
+        <div class="chart-card chart-card-sub">
+          <span class="chart-title">ATR</span>
+          <div id="chartCompATR"></div>
+        </div>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
