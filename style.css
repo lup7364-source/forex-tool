@@ -1,243 +1,410 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Forex Tool</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=10">
-</head>
-<body>
+:root {
+  --bg: #080B0D;
+  --bg-glow: radial-gradient(circle at 15% -10%, rgba(45,212,191,0.14), transparent 45%);
+  --surface: #0F1517;
+  --surface-2: #141B1D;
+  --border: rgba(148, 178, 176, 0.14);
+  --border-strong: rgba(148, 178, 176, 0.28);
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark"></span>
-      <span class="brand-name">Forex Tool</span>
-    </div>
-    <div class="topbar-right">
-      <span id="status" class="status-pill">Conectando…</span>
-      <button id="btnLogout" class="btn btn-ghost" style="display:none;">Salir</button>
-    </div>
-  </header>
+  --text: #E7EEEC;
+  --text-muted: #8CA0A0;
+  --text-faint: #5E6E6E;
 
-  <main class="wrap">
+  --teal: #2DD4BF;
+  --teal-dim: rgba(45, 212, 191, 0.12);
+  --rose: #F87171;
+  --rose-dim: rgba(248, 113, 113, 0.12);
 
-    <section id="login" class="card card-narrow">
-      <h2>Iniciar sesión</h2>
-      <div class="field">
-        <label for="email">Correo</label>
-        <input type="email" id="email" placeholder="tu@correo.com">
-      </div>
-      <div class="field">
-        <label for="password">Contraseña</label>
-        <input type="password" id="password" placeholder="••••••••">
-      </div>
-      <button id="btnLogin" class="btn btn-primary btn-block">Entrar</button>
-      <p id="mensajeLogin" class="msg"></p>
-    </section>
+  --radius: 10px;
+  --radius-sm: 7px;
+}
 
-    <section id="buscador" class="card" style="display:none;">
-      <h2>Buscar vela</h2>
+* { box-sizing: border-box; }
 
-      <div class="field-row">
-        <div class="field">
-          <label for="symbol">Símbolo</label>
-          <input type="text" id="symbol" value="AUDUSD">
-        </div>
-        <div class="field field-sm">
-          <label for="timeframe">TF</label>
-          <input type="text" id="timeframe" value="M15">
-        </div>
-      </div>
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--bg);
+  background-image: var(--bg-glow);
+  color: var(--text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
 
-      <div class="field-row">
-        <div class="field">
-          <label for="fecha">Fecha</label>
-          <input type="date" id="fecha">
-        </div>
-        <div class="field field-sm">
-          <label for="hora">Hora</label>
-          <select id="hora"></select>
-        </div>
-        <div class="field field-sm">
-          <label for="minuto">Min</label>
-          <select id="minuto">
-            <option value="00">00</option>
-            <option value="15">15</option>
-            <option value="30">30</option>
-            <option value="45">45</option>
-          </select>
-        </div>
-      </div>
+h1, h2, h3 { margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 17px; margin-bottom: 16px; }
+h3 { font-size: 14px; }
 
-      <button id="btnBuscar" class="btn btn-primary btn-block">Buscar vela</button>
+/* ---------- Header ---------- */
 
-      <div id="resultado" class="reveal" style="display:none;">
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
 
-        <div class="candle-info">
-          <span class="candle-label">Vela encontrada</span>
-          <p id="infoVela" class="candle-values"></p>
-        </div>
+.brand { display: flex; align-items: center; gap: 9px; }
 
-        <div class="chart-card">
-          <span class="chart-title">Vela buscada (contexto ±40 velas)</span>
-          <div id="chart"></div>
-        </div>
+.brand-mark {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 10px 1px rgba(45,212,191,0.55);
+}
 
-        <div class="field">
-          <label for="nota">Nota (opcional)</label>
-          <textarea id="nota" rows="2"></textarea>
-        </div>
+.brand-name { font-weight: 600; font-size: 15px; }
 
-        <div class="button-grid">
-          <button id="btnBuyO" class="btn btn-buy">Buy O</button>
-          <button id="btnBuyX" class="btn btn-buy btn-outline">Buy X</button>
-          <button id="btnSellO" class="btn btn-sell">Sell O</button>
-          <button id="btnSellX" class="btn btn-sell btn-outline">Sell X</button>
-        </div>
+.topbar-right { display: flex; align-items: center; gap: 10px; }
 
-        <p id="mensajeMarcado" class="msg"></p>
+.status-pill {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
 
-        <div class="divider"></div>
+/* ---------- Layout ---------- */
 
-        <button id="btnSimilar" class="btn btn-secondary btn-block">Buscar punto similar</button>
-        <p id="cargandoSimilar" class="msg msg-loading" style="display:none;">Buscando entre los puntos marcados…</p>
+.wrap {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
-        <div id="resultadoSimilar" class="reveal" style="display:none;">
-          <div class="candle-info">
-            <span class="candle-label">Punto más parecido</span>
-            <p id="infoSimilar" class="candle-values"></p>
-          </div>
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
 
-          <div class="score-row">
-            <span class="score-label">Diferencia total</span>
-            <span id="porcentajeTotal" class="score-value"></span>
-          </div>
+.card-narrow { max-width: 360px; margin: 40px auto 0; }
 
-          <div class="table-scroll">
-            <table id="tablaVariables">
-              <thead>
-                <tr><th>Variable</th><th>Actual</th><th>Encontrado</th><th>Dif.</th><th>%</th></tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="divider"></div>
+/* ---------- Fields ---------- */
 
-      <button id="btnVerPuntos" class="btn btn-secondary btn-block">Ver puntos marcados</button>
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 
-      <div id="listaPuntos" class="reveal" style="display:none;">
-        <div class="score-row">
-          <span class="score-label">Exitosos</span>
-          <span id="totalExitosos" class="score-value" style="color:var(--teal);"></span>
-        </div>
-        <div class="score-row">
-          <span class="score-label">Fallidos</span>
-          <span id="totalFallidos" class="score-value" style="color:var(--rose);"></span>
-        </div>
-        <div class="score-row">
-          <span class="score-label">Pendientes</span>
-          <span id="totalPendientes" class="score-value"></span>
-        </div>
+.field-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.field-row .field { flex: 1; margin-bottom: 14px; min-width: 0; }
+.field-sm { flex: 0 0 78px; }
 
-        <div id="puntosContenedor"></div>
-      </div>
-    </section>
+@media (max-width: 480px) {
+  .field-row .field:not(.field-sm) {
+    flex-basis: 100%;
+  }
+}
 
-  </main>
+label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
 
-  <div id="paginaDetalle" class="overlay-page">
-    <div class="overlay-inner">
-      <button id="btnCerrarDetalle" class="btn btn-ghost">‹ Volver</button>
+input, select, textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 10px 11px;
+  font-size: 15px;
+  font-family: inherit;
+  width: 100%;
+  transition: border-color 0.15s ease;
+}
 
-      <div class="candle-info">
-        <span class="candle-label">Detalle del punto</span>
-        <p id="infoVelaDetalle" class="candle-values"></p>
-      </div>
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--teal);
+}
 
-      <div class="chart-card chart-card-lg">
-        <span class="chart-title">Vela seleccionada (contexto ±40 velas)</span>
-        <div id="chartDetalle"></div>
-      </div>
+textarea { resize: vertical; }
 
-      <div id="cardRSI" class="chart-card chart-card-sub" style="display:none;">
-        <span class="chart-title">RSI</span>
-        <div id="chartRSI"></div>
-      </div>
-      <div id="cardATR" class="chart-card chart-card-sub" style="display:none;">
-        <span class="chart-title">ATR</span>
-        <div id="chartATR"></div>
-      </div>
-      <div id="cardVolume" class="chart-card chart-card-sub" style="display:none;">
-        <span class="chart-title">Volumen</span>
-        <div id="chartVolume"></div>
-      </div>
+/* ---------- Buttons ---------- */
 
-      <div class="indicadores-row">
-        <label><input type="checkbox" id="chkBB"> Bands</label>
-        <label><input type="checkbox" id="chkRSI"> RSI</label>
-        <label><input type="checkbox" id="chkATR"> ATR</label>
-        <label><input type="checkbox" id="chkVolume"> Volume</label>
-        <label><input type="checkbox" id="chkEMA21"> EMA 21</label>
-        <label><input type="checkbox" id="chkSMMA21"> SMMA 21</label>
-        <label><input type="checkbox" id="chkSMMA50"> SMMA 50</label>
-        <label><input type="checkbox" id="chkSMMA200"> SMMA 200</label>
-        <label><input type="checkbox" id="chkSuperponer"> Calco</label>
-        <label class="lbl-similar"><input type="checkbox" id="chkBBSimilar"> Bands</label>
-        <label class="lbl-similar"><input type="checkbox" id="chkEMA21Similar"> EMA 21</label>
-        <label class="lbl-similar"><input type="checkbox" id="chkSMMA21Similar"> SMMA 21</label>
-        <label class="lbl-similar"><input type="checkbox" id="chkSMMA50Similar"> SMMA 50</label>
-        <label class="lbl-similar"><input type="checkbox" id="chkSMMA200Similar"> SMMA 200</label>
-      </div>
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.05s ease;
+}
 
-      <div id="variablesVelaDetalle" class="variables-grid"></div>
+.btn:active { transform: scale(0.98); }
+.btn-block { width: 100%; }
 
-      <div class="divider"></div>
+.btn-primary { background: var(--teal); color: #06201C; }
+.btn-primary:hover { filter: brightness(1.08); }
 
-      <button id="btnSimilaresGlobal" class="btn btn-secondary btn-block">Buscar puntos similares</button>
-      <p id="cargandoSimilaresGlobal" class="msg msg-loading" style="display:none;">Comparando contra toda la base de datos…</p>
+.btn-secondary {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
 
-      <div id="resultadoSimilaresGlobal" class="reveal" style="display:none;">
-        <div class="score-row">
-          <span class="score-label">Mejor coincidencia</span>
-          <span id="porcentajeGlobalTop" class="score-value"></span>
-        </div>
-        <div id="listaSimilaresGlobal"></div>
-      </div>
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.btn-ghost:hover { border-color: var(--border-strong); color: var(--text); }
 
-      <div id="comparacionContainer" style="display:none; margin-top:18px;">
-        <div class="score-row">
-          <span id="infoComparacion" class="score-label"></span>
-          <button id="btnQuitarComparacion" class="btn btn-ghost">Quitar comparación</button>
-        </div>
+.btn-buy { background: var(--teal); color: #06201C; }
+.btn-sell { background: var(--rose); color: #2A0B0B; }
 
-        <p class="msg-loading" style="margin-bottom:10px;">Teal = vela actual · Ámbar = vela comparada · eje horizontal = velas antes/después del punto</p>
-        <div class="chart-card chart-card-sub">
-          <span class="chart-title">Precio (% relativo al punto)</span>
-          <div id="chartCompPrecio"></div>
-        </div>
-        <div class="chart-card chart-card-sub">
-          <span class="chart-title">RSI</span>
-          <div id="chartCompRSI"></div>
-        </div>
-        <div class="chart-card chart-card-sub">
-          <span class="chart-title">Volumen</span>
-          <div id="chartCompVolume"></div>
-        </div>
-        <div class="chart-card chart-card-sub">
-          <span class="chart-title">ATR</span>
-          <div id="chartCompATR"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+.btn-outline.btn-buy {
+  background: transparent;
+  border-color: var(--teal);
+  color: var(--teal);
+}
+.btn-outline.btn-sell {
+  background: transparent;
+  border-color: var(--rose);
+  color: var(--rose);
+}
 
-  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=14"></script>
-</body>
-</html>
+.button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+/* ---------- Result blocks ---------- */
+
+.reveal { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+
+.candle-info { margin-bottom: 16px; }
+
+.candle-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: none;
+}
+
+.candle-values {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.msg { font-size: 13px; color: var(--teal); min-height: 1em; margin: 8px 0 0; }
+.msg-loading { color: var(--text-muted); }
+
+.divider { height: 1px; background: var(--border); margin: 18px 0; }
+
+.score-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.score-label { font-size: 12px; color: var(--text-muted); }
+.score-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--teal); }
+
+.chart-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+/* Título identificando cada gráfico (RSI, ATR, Volumen, etc.) */
+.chart-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4B5563;
+  padding: 2px 4px 8px;
+  letter-spacing: 0.01em;
+}
+
+#chart { width: 100%; }
+
+.punto-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  font-size: 12.5px;
+}
+
+.punto-badge { font-weight: 600; flex: 0 0 auto; }
+.punto-fecha { color: var(--text-muted); flex: 1; }
+.punto-resultado { font-weight: 600; text-transform: capitalize; }
+
+.punto-exitoso { border-color: rgba(45,212,191,0.35); }
+.punto-exitoso .punto-resultado { color: var(--teal); }
+
+.punto-fallido { border-color: rgba(248,113,113,0.35); }
+.punto-fallido .punto-resultado { color: var(--rose); }
+
+.punto-pendiente .punto-resultado { color: var(--text-muted); }
+
+.overlay-page {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 100;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.overlay-page.abierto { display: block; }
+
+.overlay-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.variables-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.variable-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+.variable-card .v-nombre {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+
+.variable-card .v-valor {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-card-lg #chart, .chart-card-lg #chartDetalle { min-height: 380px; }
+
+.chart-card-sub {
+  padding: 4px;
+  margin-bottom: 10px;
+}
+
+.chart-card-sub .chart-title {
+  padding: 4px 8px 6px;
+}
+
+.chart-card-sub #chartRSI,
+.chart-card-sub #chartATR,
+.chart-card-sub #chartVolume {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .wrap { max-width: 720px; }
+  .overlay-inner .candle-info { margin: 16px 0; }
+}
+
+.indicadores-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.indicadores-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.indicadores-row input { accent-color: var(--teal); }
+
+/* Checkboxes de indicadores para el punto similar: en rojo para diferenciarlos
+   de los del punto original (gris/teal/variado). */
+.lbl-similar { color: var(--rose); }
+.lbl-similar input { accent-color: var(--rose); }
+
+.similar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.similar-item:hover { border-color: var(--border-strong); }
+
+.similar-item .sim-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.similar-item .sim-pct { color: var(--teal); font-weight: 600; }
+.similar-item .sim-fecha { color: var(--text-muted); font-size: 12px; }
+
+/* ---------- Table ---------- */
+
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+
+th {
+  text-align: left;
+  padding: 9px 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+tr:last-child td { border-bottom: none; }
+
+tr.match-exact td {
+  background: var(--teal-dim);
+  color: var(--teal);
+}
