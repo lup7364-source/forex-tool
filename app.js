@@ -657,7 +657,7 @@ document.getElementById("chkBBSimilar").addEventListener("change", (e) => {
 document.getElementById("chkEMA21Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("EMA21", "EMA_21", "#F472B6");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "rgba(56, 189, 248, 0.6)");
   } else {
     quitarIndicadorSimilar("EMA21");
   }
@@ -665,7 +665,7 @@ document.getElementById("chkEMA21Similar").addEventListener("change", (e) => {
 document.getElementById("chkSMMA21Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#EF4444");
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "rgba(248, 113, 113, 0.6)");
   } else {
     quitarIndicadorSimilar("SMMA21");
   }
@@ -673,7 +673,7 @@ document.getElementById("chkSMMA21Similar").addEventListener("change", (e) => {
 document.getElementById("chkSMMA50Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#F97316");
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "rgba(251, 146, 60, 0.6)");
   } else {
     quitarIndicadorSimilar("SMMA50");
   }
@@ -681,7 +681,7 @@ document.getElementById("chkSMMA50Similar").addEventListener("change", (e) => {
 document.getElementById("chkSMMA200Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "#A855F7");
+    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "rgba(192, 132, 252, 0.6)");
   } else {
     quitarIndicadorSimilar("SMMA200");
   }
@@ -894,9 +894,9 @@ function requiereComparacionActiva(checkboxEl) {
 
 function agregarBBSimilar() {
   const { chart } = chartsPorContenedor["chartDetalle"];
-  const up = chart.addLineSeries({ color: "#FCA5A5", lineWidth: 1, priceLineVisible: false });
-  const mid = chart.addLineSeries({ color: "#EF4444", lineWidth: 1, priceLineVisible: false });
-  const dw = chart.addLineSeries({ color: "#FCA5A5", lineWidth: 1, priceLineVisible: false });
+  const up = chart.addLineSeries({ color: "rgba(45, 212, 191, 0.55)", lineWidth: 1, priceLineVisible: false });
+  const mid = chart.addLineSeries({ color: "rgba(140, 160, 160, 0.55)", lineWidth: 1, priceLineVisible: false });
+  const dw = chart.addLineSeries({ color: "rgba(45, 212, 191, 0.55)", lineWidth: 1, priceLineVisible: false });
   up.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_UP", true, rangoVelasDetalle, velaDetalleActual));
   mid.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_MID", true, rangoVelasDetalle, velaDetalleActual));
   dw.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_DW", true, rangoVelasDetalle, velaDetalleActual));
@@ -932,19 +932,19 @@ function refrescarIndicadoresSimilares() {
   }
   if (document.getElementById("chkEMA21Similar").checked) {
     quitarIndicadorSimilar("EMA21");
-    agregarMediaMovilSimilar("EMA21", "EMA_21", "#355C7D");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "rgba(56, 189, 248, 0.6)");
   }
   if (document.getElementById("chkSMMA21Similar").checked) {
     quitarIndicadorSimilar("SMMA21");
-    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#38BDF8");
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "rgba(248, 113, 113, 0.6)");
   }
   if (document.getElementById("chkSMMA50Similar").checked) {
     quitarIndicadorSimilar("SMMA50");
-    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#2DD4BF");
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "rgba(251, 146, 60, 0.6)");
   }
   if (document.getElementById("chkSMMA200Similar").checked) {
     quitarIndicadorSimilar("SMMA200");
-    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "#A855F7");
+    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "rgba(192, 132, 252, 0.6)");
   }
 }
 
