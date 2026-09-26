@@ -151,17 +151,16 @@ function inicializarChart(containerId) {
     borderDownColor: "#000000",
     wickUpColor: "#000000",
     wickDownColor: "#000000",
+    priceFormat: { type: "price", precision: 5, minMove: 0.00001 },
   });
 
   chartsPorContenedor[containerId] = { chart, serie };
   return chartsPorContenedor[containerId];
 }
 
-async function dibujarGraficoAlrededorDe(vela, containerId = "chart") {
-  const { chart, serie } = inicializarChart(containerId);
-
-  const RANGO_VELAS = 40; // velas antes y después
-  const MS_POR_VELA = 15 * 60 * 1000; // M15
+async function traerRangoVelas(vela) {
+  const RANGO_VELAS = 40;
+  const MS_POR_VELA = 15 * 60 * 1000;
 
   const centro = new Date(vela.timestamp);
   const desde = new Date(centro.getTime() - RANGO_VELAS * MS_POR_VELA).toISOString();
@@ -169,7 +168,7 @@ async function dibujarGraficoAlrededorDe(vela, containerId = "chart") {
 
   const { data, error } = await supabaseClient
     .from("candles")
-    .select("timestamp, open, high, low, close")
+    .select("timestamp, open, high, low, close, volume, variables")
     .eq("symbol", vela.symbol)
     .eq("timeframe", vela.timeframe)
     .gte("timestamp", desde)
@@ -177,9 +176,15 @@ async function dibujarGraficoAlrededorDe(vela, containerId = "chart") {
     .order("timestamp", { ascending: true });
 
   if (error) {
-    console.error("Error cargando el gráfico:", error);
-    return;
+    console.error("Error cargando rango de velas:", error);
+    return [];
   }
+  return data;
+}
+
+async function dibujarGraficoAlrededorDe(vela, containerId = "chart") {
+  const { chart, serie } = inicializarChart(containerId);
+  const data = await traerRangoVelas(vela);
 
   const datos = data.map((c) => {
     const esLaVelaBuscada = c.timestamp === vela.timestamp;
@@ -202,6 +207,7 @@ async function dibujarGraficoAlrededorDe(vela, containerId = "chart") {
 
   serie.setData(datos);
   chart.timeScale().fitContent();
+  return data;
 }
 function llenarSelectHoras() {
   const select = document.getElementById("hora");
@@ -358,6 +364,7 @@ async function verPuntosMarcados() {
     fila.className = "punto-item punto-" + resultado;
     fila.style.cursor = "pointer";
     fila.dataset.candleId = p.candles ? p.candles.id : "";
+    fila.dataset.resultado = resultado;
 
     const fechaTexto = c ? c.timestamp.replace("T", " ").slice(0, 16) : "vela no encontrada";
 
@@ -376,7 +383,10 @@ async function verPuntosMarcados() {
   listaPuntos.style.display = "block";
 }
 
-async function verDetallePunto(candleId) {
+let velaDetalleActual = null;
+let rangoVelasDetalle = [];
+
+async function verDetallePunto(candleId, resultado) {
   if (!candleId) return;
 
   const { data, error } = await supabaseClient
@@ -390,13 +400,15 @@ async function verDetallePunto(candleId) {
     return;
   }
 
+  velaDetalleActual = data;
+  limpiarIndicadores();
+
   document.getElementById("infoVelaDetalle").textContent =
-    `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ` +
-    `O:${data.open} H:${data.high} L:${data.low} C:${data.close}`;
+    `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ${resultado || "sin evaluar"}`;
 
   document.getElementById("paginaDetalle").classList.add("abierto");
 
-  await dibujarGraficoAlrededorDe(data, "chartDetalle");
+  rangoVelasDetalle = await dibujarGraficoAlrededorDe(data, "chartDetalle");
   const variablesCompletas = {
     OPEN: data.open,
     HIGH: data.high,
@@ -434,9 +446,25 @@ const ORDEN_VARIABLES = [
   "BODY_SIZE", "UPPER_SHADOW", "LOWER_SHADOW", "FULL_SIZE",
 ];
 
-function formatearValor(valor) {
+const DOS_DECIMALES = new Set([
+  "RSI",
+  "OPEN-BBUP", "OPEN-BBMID", "OPEN-BBDW",
+  "CLOSE-BBUP", "CLOSE-BBMID", "CLOSE-BBDW",
+  "HIGH-BBUP", "HIGH-BBMID", "HIGH-BBDW",
+  "LOW-BBUP", "LOW-BBMID", "LOW-BBDW",
+  "OPEN-200", "OPEN-50", "OPEN-21",
+  "CLOSE-200", "CLOSE-50", "CLOSE-21",
+  "HIGH-200", "HIGH-50", "HIGH-21",
+  "LOW-200", "LOW-50", "LOW-21",
+  "BODY_SIZE", "UPPER_SHADOW", "LOWER_SHADOW", "FULL_SIZE",
+]);
+
+function formatearValor(clave, valor) {
   const numero = Number(valor);
-  return Number.isFinite(numero) ? numero.toFixed(5) : valor;
+  if (!Number.isFinite(numero)) return valor;
+  if (clave === "VOLUME") return numero.toFixed(0);
+  if (DOS_DECIMALES.has(clave)) return numero.toFixed(2);
+  return numero.toFixed(5);
 }
 
 function mostrarVariablesVela(variables, containerId) {
@@ -454,7 +482,7 @@ function mostrarVariablesVela(variables, containerId) {
     tarjeta.className = "variable-card";
     tarjeta.innerHTML = `
       <span class="v-nombre">${clave}</span>
-      <span class="v-valor">${formatearValor(variables[clave])}</span>
+      <span class="v-valor">${formatearValor(clave, variables[clave])}</span>
     `;
     contenedor.appendChild(tarjeta);
   }
@@ -462,9 +490,339 @@ function mostrarVariablesVela(variables, containerId) {
 
 document.getElementById("btnCerrarDetalle").addEventListener("click", cerrarDetalle);
 
+// ---------- Indicadores toggleables sobre el gráfico de detalle ----------
+
+const indicadoresActivos = {};
+
+function datosSerieIndicador(clave, esVariable) {
+  return rangoVelasDetalle.map((c) => ({
+    time: Math.floor(new Date(c.timestamp).getTime() / 1000),
+    value: esVariable ? c.variables[clave] : c[clave],
+  }));
+}
+
+function tiempoVelaCentral() {
+  return Math.floor(new Date(velaDetalleActual.timestamp).getTime() / 1000);
+}
+
+function marcadorAmarillo() {
+  return [{ time: tiempoVelaCentral(), position: "inBar", color: "#F5C518", shape: "circle" }];
+}
+
+function agregarBB() {
+  const { chart } = chartsPorContenedor["chartDetalle"];
+  const up = chart.addLineSeries({ color: "#2DD4BF", lineWidth: 1, priceLineVisible: false });
+  const mid = chart.addLineSeries({ color: "#8CA0A0", lineWidth: 1, priceLineVisible: false });
+  const dw = chart.addLineSeries({ color: "#2DD4BF", lineWidth: 1, priceLineVisible: false });
+  up.setData(datosSerieIndicador("BB_UP", true));
+  mid.setData(datosSerieIndicador("BB_MID", true));
+  dw.setData(datosSerieIndicador("BB_DW", true));
+  up.setMarkers(marcadorAmarillo());
+  indicadoresActivos.BB = [up, mid, dw];
+}
+
+function crearOReusarSubChart(containerId, tipoSerie, colorSerie) {
+  if (chartsPorContenedor[containerId]) return chartsPorContenedor[containerId];
+
+  const chart = LightweightCharts.createChart(document.getElementById(containerId), {
+    height: 130,
+    layout: { background: { color: "#FFFFFF" }, textColor: "#222222" },
+    grid: { vertLines: { color: "#EAEAEA" }, horzLines: { color: "#EAEAEA" } },
+    timeScale: { timeVisible: true, secondsVisible: false },
+    rightPriceScale: { borderColor: "#CCCCCC" },
+  });
+
+  const serie =
+    tipoSerie === "histogram"
+      ? chart.addHistogramSeries({ color: colorSerie, priceLineVisible: false })
+      : chart.addLineSeries({ color: colorSerie, lineWidth: 1, priceLineVisible: false });
+
+  chartsPorContenedor[containerId] = { chart, serie };
+  return chartsPorContenedor[containerId];
+}
+
+function agregarRSI() {
+  document.getElementById("cardRSI").style.display = "block";
+  const { chart, serie } = crearOReusarSubChart("chartRSI", "line", "#F59E0B");
+  serie.setData(datosSerieIndicador("RSI", true));
+  serie.setMarkers(marcadorAmarillo());
+  chart.timeScale().fitContent();
+}
+
+function agregarATR() {
+  document.getElementById("cardATR").style.display = "block";
+  const { chart, serie } = crearOReusarSubChart("chartATR", "line", "#A78BFA");
+  serie.setData(datosSerieIndicador("ATR", true));
+  serie.setMarkers(marcadorAmarillo());
+  chart.timeScale().fitContent();
+}
+
+function agregarVolume() {
+  document.getElementById("cardVolume").style.display = "block";
+  const { chart, serie } = crearOReusarSubChart("chartVolume", "histogram", "#8CA0A0");
+  serie.setData(datosSerieIndicador("volume", false));
+  serie.setMarkers(marcadorAmarillo());
+  chart.timeScale().fitContent();
+}
+
+function ocultarSubChart(cardId) {
+  document.getElementById(cardId).style.display = "none";
+}
+
+function agregarMediaMovil(nombre, clave, color) {
+  const { chart } = chartsPorContenedor["chartDetalle"];
+  const serie = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false });
+  serie.setData(datosSerieIndicador(clave, true));
+  serie.setMarkers(marcadorAmarillo());
+  indicadoresActivos[nombre] = [serie];
+}
+
+function quitarIndicador(nombre) {
+  const { chart } = chartsPorContenedor["chartDetalle"] || {};
+  if (!chart || !indicadoresActivos[nombre]) return;
+  for (const serie of indicadoresActivos[nombre]) chart.removeSeries(serie);
+  delete indicadoresActivos[nombre];
+}
+
+function limpiarIndicadores() {
+  for (const nombre of Object.keys(indicadoresActivos)) quitarIndicador(nombre);
+  ["cardRSI", "cardATR", "cardVolume"].forEach(ocultarSubChart);
+  ["chkBB", "chkRSI", "chkATR", "chkVolume", "chkEMA21", "chkSMMA21", "chkSMMA50", "chkSMMA200"].forEach((id) => {
+    document.getElementById(id).checked = false;
+  });
+}
+
+document.getElementById("chkBB").addEventListener("change", (e) =>
+  e.target.checked ? agregarBB() : quitarIndicador("BB")
+);
+document.getElementById("chkRSI").addEventListener("change", (e) =>
+  e.target.checked ? agregarRSI() : ocultarSubChart("cardRSI")
+);
+document.getElementById("chkATR").addEventListener("change", (e) =>
+  e.target.checked ? agregarATR() : ocultarSubChart("cardATR")
+);
+document.getElementById("chkVolume").addEventListener("change", (e) =>
+  e.target.checked ? agregarVolume() : ocultarSubChart("cardVolume")
+);
+document.getElementById("chkEMA21").addEventListener("change", (e) =>
+  e.target.checked ? agregarMediaMovil("EMA21", "EMA_21", "#38BDF8") : quitarIndicador("EMA21")
+);
+document.getElementById("chkSMMA21").addEventListener("change", (e) =>
+  e.target.checked ? agregarMediaMovil("SMMA21", "SMMA_21", "#F87171") : quitarIndicador("SMMA21")
+);
+document.getElementById("chkSMMA50").addEventListener("change", (e) =>
+  e.target.checked ? agregarMediaMovil("SMMA50", "SMMA_50", "#FB923C") : quitarIndicador("SMMA50")
+);
+document.getElementById("chkSMMA200").addEventListener("change", (e) =>
+  e.target.checked ? agregarMediaMovil("SMMA200", "SMMA_200", "#C084FC") : quitarIndicador("SMMA200")
+);
+
+// ---------- Búsqueda de puntos similares en TODA la base de datos ----------
+
+async function buscarSimilaresGlobal() {
+  if (!velaDetalleActual) return;
+
+  document.getElementById("cargandoSimilaresGlobal").style.display = "block";
+  document.getElementById("resultadoSimilaresGlobal").style.display = "none";
+
+  const { data: todasLasVelas, error: errorVelas } = await supabaseClient
+    .from("candles")
+    .select("variables")
+    .eq("symbol", velaDetalleActual.symbol)
+    .eq("timeframe", velaDetalleActual.timeframe);
+
+  if (errorVelas) {
+    alert("Error trayendo velas para normalizar: " + errorVelas.message);
+    return;
+  }
+
+  const minMax = {};
+  for (const fila of todasLasVelas) {
+    for (const [clave, valor] of Object.entries(fila.variables || {})) {
+      if (valor === null || valor === undefined) continue;
+      if (!minMax[clave]) minMax[clave] = [valor, valor];
+      minMax[clave][0] = Math.min(minMax[clave][0], valor);
+      minMax[clave][1] = Math.max(minMax[clave][1], valor);
+    }
+  }
+
+  const { data: candidatas, error: errorCand } = await supabaseClient
+    .from("candles")
+    .select("id, symbol, timeframe, timestamp, variables")
+    .eq("symbol", velaDetalleActual.symbol)
+    .eq("timeframe", velaDetalleActual.timeframe);
+
+  if (errorCand) {
+    alert("Error trayendo velas candidatas: " + errorCand.message);
+    return;
+  }
+
+  const actual = velaDetalleActual.variables || {};
+
+  const resultados = candidatas
+    .filter((c) => c.id !== velaDetalleActual.id)
+    .map((c) => {
+      let suma = 0;
+      let contador = 0;
+      for (const clave of Object.keys(minMax)) {
+        const v1 = actual[clave];
+        const v2 = c.variables[clave];
+        if (v1 === undefined || v2 === undefined) continue;
+        const [min, max] = minMax[clave];
+        const rango = max - min || 1;
+        suma += (Math.abs(v2 - v1) / rango) * 100;
+        contador++;
+      }
+      const promedio = contador > 0 ? suma / contador : 100;
+      return { candle: c, promedio };
+    });
+
+  resultados.sort((a, b) => a.promedio - b.promedio);
+  mostrarListaSimilaresGlobal(resultados.slice(0, 15));
+}
+
+function mostrarListaSimilaresGlobal(lista) {
+  document.getElementById("cargandoSimilaresGlobal").style.display = "none";
+  document.getElementById("resultadoSimilaresGlobal").style.display = "block";
+  document.getElementById("porcentajeGlobalTop").textContent = lista.length
+    ? lista[0].promedio.toFixed(2) + "%"
+    : "sin resultados";
+
+  const contenedor = document.getElementById("listaSimilaresGlobal");
+  contenedor.innerHTML = "";
+
+  lista.forEach((item, i) => {
+    const el = document.createElement("div");
+    el.className = "similar-item";
+    el.dataset.candleId = item.candle.id;
+    el.dataset.pct = item.promedio;
+    el.innerHTML = `
+      <div class="sim-top">
+        <span>#${i + 1} — ${item.candle.symbol} ${item.candle.timeframe}</span>
+        <span class="sim-pct">${item.promedio.toFixed(2)}% dif.</span>
+      </div>
+      <span class="sim-fecha">${item.candle.timestamp.replace("T", " ").slice(0, 16)}</span>
+    `;
+    contenedor.appendChild(el);
+  });
+}
+
+document.getElementById("listaSimilaresGlobal").addEventListener("click", (evento) => {
+  const item = evento.target.closest(".similar-item");
+  if (item) activarComparacion(item.dataset.candleId, Number(item.dataset.pct));
+});
+
+document.getElementById("btnSimilaresGlobal").addEventListener("click", buscarSimilaresGlobal);
+
+// ---------- Modo comparación: superponer dos velas por posición relativa ----------
+
+const REF_EPOCH = Date.UTC(2000, 0, 1) / 1000; // ancla fija, no representa una fecha real
+const seg_por_vela = 15 * 60; // M15
+
+function formatearOffset(time) {
+  const offset = Math.round((time - REF_EPOCH) / seg_por_vela);
+  return offset === 0 ? "●" : offset > 0 ? "+" + offset : String(offset);
+}
+
+function serieRelativa(rango, velaCentro, clave, esVariable) {
+  const centroIdx = rango.findIndex((c) => c.timestamp === velaCentro.timestamp);
+  if (centroIdx === -1) return [];
+
+  return rango.map((c, i) => ({
+    time: REF_EPOCH + (i - centroIdx) * seg_por_vela,
+    value: esVariable ? c.variables[clave] : c[clave],
+  }));
+}
+
+function serieRelativaPrecioNormalizado(rango, velaCentro) {
+  const centroIdx = rango.findIndex((c) => c.timestamp === velaCentro.timestamp);
+  if (centroIdx === -1) return [];
+  const closeCentro = rango[centroIdx].close;
+
+  return rango.map((c, i) => ({
+    time: REF_EPOCH + (i - centroIdx) * seg_por_vela,
+    value: ((c.close - closeCentro) / closeCentro) * 100,
+  }));
+}
+
+const chartsComparacion = {};
+
+function crearChartComparacion(containerId) {
+  if (chartsComparacion[containerId]) return chartsComparacion[containerId];
+
+  const chart = LightweightCharts.createChart(document.getElementById(containerId), {
+    height: 150,
+    layout: { background: { color: "#FFFFFF" }, textColor: "#222222" },
+    grid: { vertLines: { color: "#EAEAEA" }, horzLines: { color: "#EAEAEA" } },
+    timeScale: { tickMarkFormatter: formatearOffset },
+    localization: { timeFormatter: formatearOffset },
+    rightPriceScale: { borderColor: "#CCCCCC" },
+  });
+
+  const serieActual = chart.addLineSeries({ color: "#2DD4BF", lineWidth: 2, priceLineVisible: false });
+  const serieComparada = chart.addLineSeries({ color: "#F59E0B", lineWidth: 2, priceLineVisible: false });
+
+  chartsComparacion[containerId] = { chart, serieActual, serieComparada };
+  return chartsComparacion[containerId];
+}
+
+function dibujarComparacionEn(containerId, datosActual, datosComparado) {
+  const { chart, serieActual, serieComparada } = crearChartComparacion(containerId);
+  serieActual.setData(datosActual);
+  serieComparada.setData(datosComparado);
+  chart.timeScale().fitContent();
+}
+
+async function activarComparacion(candleId, porcentaje) {
+  const { data: candidata, error } = await supabaseClient
+    .from("candles")
+    .select("*")
+    .eq("id", candleId)
+    .maybeSingle();
+
+  if (error || !candidata) {
+    alert("No se pudo cargar la vela a comparar: " + (error ? error.message : "no encontrada"));
+    return;
+  }
+
+  const rangoA = rangoVelasDetalle;
+  const rangoB = await traerRangoVelas(candidata);
+
+  document.getElementById("comparacionContainer").style.display = "block";
+  document.getElementById("infoComparacion").textContent =
+    `Comparando con ${candidata.symbol} ${candidata.timeframe} — ${candidata.timestamp.replace("T", " ").slice(0, 16)} (dif: ${porcentaje.toFixed(2)}%)`;
+
+  dibujarComparacionEn(
+    "chartCompPrecio",
+    serieRelativaPrecioNormalizado(rangoA, velaDetalleActual),
+    serieRelativaPrecioNormalizado(rangoB, candidata)
+  );
+  dibujarComparacionEn(
+    "chartCompRSI",
+    serieRelativa(rangoA, velaDetalleActual, "RSI", true),
+    serieRelativa(rangoB, candidata, "RSI", true)
+  );
+  dibujarComparacionEn(
+    "chartCompVolume",
+    serieRelativa(rangoA, velaDetalleActual, "volume", false),
+    serieRelativa(rangoB, candidata, "volume", false)
+  );
+  dibujarComparacionEn(
+    "chartCompATR",
+    serieRelativa(rangoA, velaDetalleActual, "ATR", true),
+    serieRelativa(rangoB, candidata, "ATR", true)
+  );
+
+  document.getElementById("comparacionContainer").scrollIntoView({ behavior: "smooth" });
+}
+
+document.getElementById("btnQuitarComparacion").addEventListener("click", () => {
+  document.getElementById("comparacionContainer").style.display = "none";
+});
+
 document.getElementById("puntosContenedor").addEventListener("click", (evento) => {
   const item = evento.target.closest(".punto-item");
-  if (item) verDetallePunto(item.dataset.candleId);
+  if (item) verDetallePunto(item.dataset.candleId, item.dataset.resultado);
 });
 
 document.getElementById("btnBuscar").addEventListener("click", buscarVela);
