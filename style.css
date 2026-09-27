@@ -353,24 +353,6 @@ textarea { resize: vertical; }
 }
 .indicadores-row input { accent-color: var(--teal); }
 
-/* Fix móvil: en algunos navegadores (Safari/iOS) los checkboxes dentro de un
-   flex-wrap se "encogen" o se superponen con el texto del siguiente elemento
-   cuando el ancho es angosto. Se fuerza que ni el checkbox ni su etiqueta se
-   encojan, solo en pantallas chicas, para no tocar la vista de escritorio. */
-@media (max-width: 639px) {
-  .indicadores-row label {
-    flex-shrink: 0;
-  }
-  .indicadores-row input[type="checkbox"] {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    min-width: 16px;
-    min-height: 16px;
-    margin: 0;
-  }
-}
-
 /* Checkboxes de indicadores para el punto similar: en rojo para diferenciarlos
    de los del punto original (gris/teal/variado). */
 .lbl-similar { color: var(--rose); }
@@ -397,6 +379,12 @@ textarea { resize: vertical; }
 
 .similar-item .sim-pct { color: var(--teal); font-weight: 600; }
 .similar-item .sim-fecha { color: var(--text-muted); font-size: 12px; }
+
+.sim-estado { font-weight: 600; text-transform: capitalize; }
+.sim-estado-exitoso { color: var(--teal); }
+.sim-estado-fallido { color: var(--rose); }
+.sim-estado-pendiente,
+.sim-estado-no-evaluado { color: var(--text-muted); }
 
 /* ---------- Table ---------- */
 
