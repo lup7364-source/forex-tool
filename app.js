@@ -657,7 +657,7 @@ document.getElementById("chkBBSimilar").addEventListener("change", (e) => {
 document.getElementById("chkEMA21Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("EMA21", "EMA_21", "rgba(56, 189, 248, 0.6)");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "#F472B6");
   } else {
     quitarIndicadorSimilar("EMA21");
   }
@@ -665,7 +665,7 @@ document.getElementById("chkEMA21Similar").addEventListener("change", (e) => {
 document.getElementById("chkSMMA21Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "rgba(248, 113, 113, 0.6)");
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#EF4444");
   } else {
     quitarIndicadorSimilar("SMMA21");
   }
@@ -673,7 +673,7 @@ document.getElementById("chkSMMA21Similar").addEventListener("change", (e) => {
 document.getElementById("chkSMMA50Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "rgba(251, 146, 60, 0.6)");
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#F97316");
   } else {
     quitarIndicadorSimilar("SMMA50");
   }
@@ -681,7 +681,7 @@ document.getElementById("chkSMMA50Similar").addEventListener("change", (e) => {
 document.getElementById("chkSMMA200Similar").addEventListener("change", (e) => {
   if (e.target.checked) {
     if (!requiereComparacionActiva(e.target)) return;
-    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "rgba(192, 132, 252, 0.6)");
+    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "#A855F7");
   } else {
     quitarIndicadorSimilar("SMMA200");
   }
@@ -727,6 +727,23 @@ async function buscarSimilaresGlobal() {
     return;
   }
 
+  // Traer el resultado (si existe) de los puntos ya marcados para estas velas
+  const { data: puntosExistentes, error: errorPuntosExistentes } = await supabaseClient
+    .from("points")
+    .select("candle_id, resultado, candles!inner(symbol, timeframe)")
+    .eq("candles.symbol", velaDetalleActual.symbol)
+    .eq("candles.timeframe", velaDetalleActual.timeframe);
+
+  if (errorPuntosExistentes) {
+    alert("Error trayendo puntos existentes: " + errorPuntosExistentes.message);
+    return;
+  }
+
+  const resultadoPorCandleId = new Map();
+  for (const p of puntosExistentes) {
+    resultadoPorCandleId.set(p.candle_id, p.resultado || "pendiente");
+  }
+
   const actual = velaDetalleActual.variables || {};
 
   const resultados = candidatas
@@ -744,7 +761,7 @@ async function buscarSimilaresGlobal() {
         contador++;
       }
       const promedio = contador > 0 ? suma / contador : 100;
-      return { candle: c, promedio };
+      return { candle: c, promedio, estado: resultadoPorCandleId.get(c.id) || "no evaluado" };
     });
 
   resultados.sort((a, b) => a.promedio - b.promedio);
@@ -769,7 +786,7 @@ function mostrarListaSimilaresGlobal(lista) {
     el.innerHTML = `
       <div class="sim-top">
         <span>#${i + 1} — ${item.candle.symbol} ${item.candle.timeframe}</span>
-        <span class="sim-pct">${item.promedio.toFixed(2)}% dif.</span>
+        <span class="sim-pct">${item.promedio.toFixed(2)}% dif. · <span class="sim-estado sim-estado-${item.estado.replace(/\s+/g, "-")}">${item.estado}</span></span>
       </div>
       <span class="sim-fecha">${item.candle.timestamp.replace("T", " ").slice(0, 16)}</span>
     `;
@@ -818,6 +835,9 @@ function serieRelativaPrecioNormalizado(rango, velaCentro) {
 // Alinea las velas de un candidato ("B") sobre el eje de tiempo real del
 // gráfico principal ("A"), usando la posición relativa a cada vela central,
 // para poder dibujarlas como una serie de velas superpuesta y semitransparente.
+// La vela que coincide exactamente con el centro del candidato (offset 0, es
+// decir la vela "más similar" real) se pinta en rojo sólido para distinguirla
+// del resto de velas de contexto que la rodean.
 function datosVelasSuperpuestas(rangoA, velaCentroA, rangoB, velaCentroB) {
   const centroIdxA = rangoA.findIndex((c) => c.timestamp === velaCentroA.timestamp);
   const centroIdxB = rangoB.findIndex((c) => c.timestamp === velaCentroB.timestamp);
@@ -831,13 +851,22 @@ function datosVelasSuperpuestas(rangoA, velaCentroA, rangoB, velaCentroB) {
     const a = rangoA[centroIdxA + offset];
     const b = rangoB[centroIdxB + offset];
     if (!a || !b) continue;
-    datos.push({
+    const punto = {
       time: Math.floor(new Date(a.timestamp).getTime() / 1000),
       open: b.open,
       high: b.high,
       low: b.low,
       close: b.close,
-    });
+    };
+
+    if (offset === 0) {
+      // Esta es la vela central del punto similar: la que realmente coincidió.
+      punto.color = "rgba(239, 68, 68, 0.85)";
+      punto.borderColor = "#EF4444";
+      punto.wickColor = "#EF4444";
+    }
+
+    datos.push(punto);
   }
   return datos;
 }
@@ -894,9 +923,9 @@ function requiereComparacionActiva(checkboxEl) {
 
 function agregarBBSimilar() {
   const { chart } = chartsPorContenedor["chartDetalle"];
-  const up = chart.addLineSeries({ color: "rgba(45, 212, 191, 0.55)", lineWidth: 1, priceLineVisible: false });
-  const mid = chart.addLineSeries({ color: "rgba(140, 160, 160, 0.55)", lineWidth: 1, priceLineVisible: false });
-  const dw = chart.addLineSeries({ color: "rgba(45, 212, 191, 0.55)", lineWidth: 1, priceLineVisible: false });
+  const up = chart.addLineSeries({ color: "#FCA5A5", lineWidth: 1, priceLineVisible: false });
+  const mid = chart.addLineSeries({ color: "#EF4444", lineWidth: 1, priceLineVisible: false });
+  const dw = chart.addLineSeries({ color: "#FCA5A5", lineWidth: 1, priceLineVisible: false });
   up.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_UP", true, rangoVelasDetalle, velaDetalleActual));
   mid.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_MID", true, rangoVelasDetalle, velaDetalleActual));
   dw.setData(datosSerieIndicadorAlineada(ultimaComparacion.rangoB, ultimaComparacion.candidata, "BB_DW", true, rangoVelasDetalle, velaDetalleActual));
@@ -932,19 +961,19 @@ function refrescarIndicadoresSimilares() {
   }
   if (document.getElementById("chkEMA21Similar").checked) {
     quitarIndicadorSimilar("EMA21");
-    agregarMediaMovilSimilar("EMA21", "EMA_21", "rgba(56, 189, 248, 0.6)");
+    agregarMediaMovilSimilar("EMA21", "EMA_21", "#F472B6");
   }
   if (document.getElementById("chkSMMA21Similar").checked) {
     quitarIndicadorSimilar("SMMA21");
-    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "rgba(248, 113, 113, 0.6)");
+    agregarMediaMovilSimilar("SMMA21", "SMMA_21", "#EF4444");
   }
   if (document.getElementById("chkSMMA50Similar").checked) {
     quitarIndicadorSimilar("SMMA50");
-    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "rgba(251, 146, 60, 0.6)");
+    agregarMediaMovilSimilar("SMMA50", "SMMA_50", "#F97316");
   }
   if (document.getElementById("chkSMMA200Similar").checked) {
     quitarIndicadorSimilar("SMMA200");
-    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "rgba(192, 132, 252, 0.6)");
+    agregarMediaMovilSimilar("SMMA200", "SMMA_200", "#A855F7");
   }
 }
 
@@ -979,7 +1008,8 @@ function dibujarComparacionEn(containerId, datosActual, datosComparado, priceFor
 }
 
 // Dibuja las velas del punto similar sobre el gráfico principal (chartDetalle),
-// en colores más opacos, para comparar visualmente ambas formaciones.
+// en colores más opacos, para comparar visualmente ambas formaciones. La vela
+// central (el punto similar real) se resalta en rojo dentro de datosVelasSuperpuestas.
 function agregarOverlayVelas() {
   if (!ultimaComparacion || !velaDetalleActual) return;
   quitarOverlayVelas();
