@@ -3,8 +3,6 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let velaActual = null; // guarda la vela encontrada mientras el usuario decide marcarla
-
 async function manejarLogin() {
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
@@ -59,23 +57,16 @@ async function buscarVela() {
   const hora = document.getElementById("hora").value;     // 00-23
   const minuto = document.getElementById("minuto").value; // 00/15/30/45
 
-  const resultado = document.getElementById("resultado");
-  const infoVela = document.getElementById("infoVela");
-  const mensajeMarcado = document.getElementById("mensajeMarcado");
-  mensajeMarcado.textContent = "";
-
   if (!symbol || !timeframe || !fecha || hora === "") {
     alert("Completa símbolo, timeframe, fecha y hora antes de buscar.");
     return;
   }
 
-  const timestampInput = `${fecha}T${hora}:${minuto}:00`;
-
-  const timestampISO = `${timestampInput}Z`; // se usa tal cual, sin reinterpretar como hora local
+  const timestampISO = `${fecha}T${hora}:${minuto}:00Z`; // se usa tal cual, sin reinterpretar como hora local
 
   const { data, error } = await supabaseClient
     .from("candles")
-    .select("*")
+    .select("id")
     .eq("symbol", symbol)
     .eq("timeframe", timeframe)
     .eq("timestamp", timestampISO)
@@ -88,29 +79,23 @@ async function buscarVela() {
   }
 
   if (!data) {
-    resultado.style.display = "none";
     alert("No se encontró ninguna vela con esos datos exactos.");
     return;
   }
 
-  velaActual = data;
-
-  infoVela.textContent =
-    `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ` +
-    `O:${data.open} H:${data.high} L:${data.low} C:${data.close}`;
-
-  resultado.style.display = "block";
-  dibujarGraficoAlrededorDe(data, "chart");
+  // Abre la misma vista completa que los puntos marcados (gráfico, indicadores,
+  // variables), pero con los controles para marcar Buy/Sell.
+  await verDetallePunto(data.id, null, true);
 }
 
 async function marcarPunto(direccion, tipo) {
-  if (!velaActual) return;
+  if (!velaDetalleActual) return;
 
-  const nota = document.getElementById("nota").value.trim();
-  const mensajeMarcado = document.getElementById("mensajeMarcado");
+  const nota = document.getElementById("notaDetalle").value.trim();
+  const mensajeMarcado = document.getElementById("mensajeMarcadoDetalle");
 
   const { error } = await supabaseClient.from("points").insert({
-    candle_id: velaActual.id,
+    candle_id: velaDetalleActual.id,
     tipo: tipo,
     direccion: direccion,
     nota: nota || null,
@@ -222,10 +207,10 @@ function llenarSelectHoras() {
 llenarSelectHoras();
 
 async function buscarPuntoSimilar() {
-  if (!velaActual) return;
+  if (!velaDetalleActual) return;
 
-  document.getElementById("cargandoSimilar").style.display = "block";
-  document.getElementById("resultadoSimilar").style.display = "none";
+  document.getElementById("cargandoSimilarDetalle").style.display = "block";
+  document.getElementById("resultadoSimilarDetalle").style.display = "none";
 
   // 1. Traer todas las variables de todas las velas, para calcular el rango
   //    (min/max) real de cada variable y así normalizar las diferencias.
@@ -259,16 +244,16 @@ async function buscarPuntoSimilar() {
   }
 
   if (!puntos || puntos.length === 0) {
-    document.getElementById("cargandoSimilar").style.display = "none";
+    document.getElementById("cargandoSimilarDetalle").style.display = "none";
     alert("Todavía no hay puntos marcados para comparar.");
     return;
   }
 
   // 3. Calcular el % de diferencia de cada punto marcado contra la vela actual
-  const actual = velaActual.variables || {};
+  const actual = velaDetalleActual.variables || {};
 
   const candidatos = puntos
-    .filter((p) => p.candles && p.candles.id !== velaActual.id) // no comparar contra sí misma
+    .filter((p) => p.candles && p.candles.id !== velaDetalleActual.id) // no comparar contra sí misma
     .map((p) => {
       const otras = p.candles.variables || {};
       let sumaPct = 0;
@@ -302,20 +287,20 @@ async function buscarPuntoSimilar() {
 }
 
 function mostrarResultadoSimilar(mejor) {
-  document.getElementById("cargandoSimilar").style.display = "none";
-  const resultadoSimilar = document.getElementById("resultadoSimilar");
+  document.getElementById("cargandoSimilarDetalle").style.display = "none";
+  const resultadoSimilar = document.getElementById("resultadoSimilarDetalle");
   resultadoSimilar.style.display = "block";
 
   const c = mejor.punto.candles;
-  document.getElementById("infoSimilar").textContent =
+  document.getElementById("infoSimilarDetalle").textContent =
     `${c.symbol} ${c.timeframe} — ${c.timestamp.replace("T", " ").slice(0, 16)} | ` +
     `Tipo: ${mejor.punto.tipo.toUpperCase()}` +
     (mejor.punto.nota ? ` | Nota: ${mejor.punto.nota}` : "");
 
-  document.getElementById("porcentajeTotal").textContent =
+  document.getElementById("porcentajeTotalDetalle").textContent =
     mejor.promedio.toFixed(2) + "%" + (mejor.promedio === 0 ? " (coincidencia exacta)" : "");
 
-  const cuerpo = document.querySelector("#tablaVariables tbody");
+  const cuerpo = document.querySelector("#tablaVariablesDetalle tbody");
   cuerpo.innerHTML = "";
 
   // ordena mostrando primero las variables con mayor diferencia
@@ -386,7 +371,7 @@ async function verPuntosMarcados() {
 let velaDetalleActual = null;
 let rangoVelasDetalle = [];
 
-async function verDetallePunto(candleId, resultado) {
+async function verDetallePunto(candleId, resultado, modoMarcar = false) {
   if (!candleId) return;
 
   const { data, error } = await supabaseClient
@@ -415,6 +400,15 @@ async function verDetallePunto(candleId, resultado) {
     `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ${resultado || "sin evaluar"}`;
 
   document.getElementById("paginaDetalle").classList.add("abierto");
+
+  // Los controles de marcado solo aparecen cuando se llega desde "Buscar vela".
+  document.getElementById("accionesDesdeBusqueda").style.display = modoMarcar ? "block" : "none";
+  if (modoMarcar) {
+    document.getElementById("notaDetalle").value = "";
+    document.getElementById("mensajeMarcadoDetalle").textContent = "";
+    document.getElementById("resultadoSimilarDetalle").style.display = "none";
+    document.getElementById("cargandoSimilarDetalle").style.display = "none";
+  }
 
   rangoVelasDetalle = await dibujarGraficoAlrededorDe(data, "chartDetalle");
   const variablesCompletas = {
@@ -1119,10 +1113,252 @@ document.getElementById("puntosContenedor").addEventListener("click", (evento) =
 
 document.getElementById("btnBuscar").addEventListener("click", buscarVela);
 document.getElementById("btnVerPuntos").addEventListener("click", verPuntosMarcados);
-document.getElementById("btnBuyO").addEventListener("click", () => marcarPunto("buy", "bueno"));
-document.getElementById("btnBuyX").addEventListener("click", () => marcarPunto("buy", "malo"));
-document.getElementById("btnSellO").addEventListener("click", () => marcarPunto("sell", "bueno"));
-document.getElementById("btnSellX").addEventListener("click", () => marcarPunto("sell", "malo"));
-document.getElementById("btnSimilar").addEventListener("click", buscarPuntoSimilar);
+document.getElementById("btnBuyODetalle").addEventListener("click", () => marcarPunto("buy", "bueno"));
+document.getElementById("btnBuyXDetalle").addEventListener("click", () => marcarPunto("buy", "malo"));
+document.getElementById("btnSellODetalle").addEventListener("click", () => marcarPunto("sell", "bueno"));
+document.getElementById("btnSellXDetalle").addEventListener("click", () => marcarPunto("sell", "malo"));
+document.getElementById("btnSimilarDetalle").addEventListener("click", buscarPuntoSimilar);
+
+// ---------- Calculadora: pegar variables sueltas (sin fecha) y buscar el punto más parecido ----------
+
+// Cada etiqueta posible (con o sin espacio/guión bajo, con o sin ":") se
+// traduce a su nombre canónico en la tabla. Todo lo que no esté aquí se
+// ignora (SYMBOL, TIMEFRAME, DATE, o cualquier línea en blanco/desconocida).
+const ALIAS_CALCULADORA = {
+  OPEN: "OPEN", HIGH: "HIGH", LOW: "LOW", CLOSE: "CLOSE", VOLUME: "VOLUME",
+  RSI: "RSI", ATR: "ATR",
+  EMA_21: "EMA_21", EMA21: "EMA_21",
+  SMMA_21: "SMMA_21", SMMA21: "SMMA_21",
+  SMMA_50: "SMMA_50", SMMA50: "SMMA_50",
+  SMMA_200: "SMMA_200", SMMA200: "SMMA_200",
+  MACD_MAIN: "MACD_MAIN", MACDMAIN: "MACD_MAIN",
+  MACD_SIGNAL: "MACD_SIGNAL", MACDSIGNAL: "MACD_SIGNAL",
+  BB_UP: "BB_UP", BB_UPPER: "BB_UP", BBUP: "BB_UP", BBUPPER: "BB_UP",
+  BB_MID: "BB_MID", BB_MIDDLE: "BB_MID", BBMID: "BB_MID", BBMIDDLE: "BB_MID",
+  BB_DW: "BB_DW", BB_LOWER: "BB_DW", BB_DOWN: "BB_DW", BBDW: "BB_DW", BBLOWER: "BB_DW", BBDOWN: "BB_DW",
+};
+
+function parsearTextoCalculadora(texto) {
+  const valores = {};
+  const lineas = texto.split("\n");
+
+  for (const lineaCruda of lineas) {
+    const linea = lineaCruda.trim();
+    if (!linea) continue;
+
+    const idxDosPuntos = linea.indexOf(":");
+    let etiquetaCruda, valorCrudo;
+
+    if (idxDosPuntos !== -1) {
+      // Formato "ETIQUETA: valor" (con espacios permitidos en la etiqueta,
+      // ej. "MACD MAIN: 0.00059" o "BB UPPER: 0.71026").
+      etiquetaCruda = linea.slice(0, idxDosPuntos);
+      valorCrudo = linea.slice(idxDosPuntos + 1);
+    } else {
+      // Formato antiguo, pegado sin ":" (ej. "OPEN0.70391").
+      const coincidencia = linea.match(/^([A-Za-z_ ]+)(-?[\d.].*)$/);
+      if (!coincidencia) continue;
+      etiquetaCruda = coincidencia[1];
+      valorCrudo = coincidencia[2];
+    }
+
+    const etiqueta = etiquetaCruda.trim().toUpperCase().replace(/[\s_]+/g, "_");
+    const campo = ALIAS_CALCULADORA[etiqueta];
+    if (!campo) continue; // SYMBOL, TIMEFRAME, DATE u otra etiqueta desconocida
+
+    const numero = parseFloat(valorCrudo.trim());
+    if (!Number.isNaN(numero)) valores[campo] = numero;
+  }
+
+  return valores;
+}
+
+// Misma lógica que calcular_variables.py, traducida a JS: cuerpo/sombras de la
+// vela y distancias (en pips, x10000) a las medias móviles y a las Bollinger.
+function calcularVariablesDerivadas(v) {
+  const C = v.OPEN, D = v.HIGH, E = v.LOW, F = v.CLOSE;
+  const L = v.BB_UP, M = v.BB_MID, N = v.BB_DW;
+  const O = v.SMMA_21, P = v.SMMA_50, Q = v.SMMA_200;
+
+  const bodySize = (F - C) * 10000;
+  const upperShadow = (bodySize > 0 ? D - F : C - D) * 10000;
+  const lowerShadow = (bodySize > 0 ? C - E : F - E) * 10000;
+  const fullSize = Math.abs(bodySize) + Math.abs(upperShadow) + Math.abs(lowerShadow);
+
+  const r4 = (n) => Math.round(n * 10000) / 10000;
+
+  return {
+    BODY_SIZE: r4(bodySize),
+    UPPER_SHADOW: r4(upperShadow),
+    LOWER_SHADOW: r4(lowerShadow),
+    FULL_SIZE: r4(fullSize),
+
+    "OPEN-200": r4((C - Q) * 10000),
+    "OPEN-50": r4((C - P) * 10000),
+    "OPEN-21": r4((C - O) * 10000),
+    "OPEN-BBUP": r4((C - L) * 10000),
+    "OPEN-BBMID": r4((C - M) * 10000),
+    "OPEN-BBDW": r4((C - N) * 10000),
+
+    "CLOSE-200": r4((F - Q) * 10000),
+    "CLOSE-50": r4((F - P) * 10000),
+    "CLOSE-21": r4((F - O) * 10000),
+    "CLOSE-BBUP": r4((F - L) * 10000),
+    "CLOSE-BBMID": r4((F - M) * 10000),
+    "CLOSE-BBDW": r4((F - N) * 10000),
+
+    "HIGH-200": r4((D - Q) * 10000),
+    "HIGH-50": r4((D - P) * 10000),
+    "HIGH-21": r4((D - O) * 10000),
+    "HIGH-BBUP": r4((D - L) * 10000),
+    "HIGH-BBMID": r4((D - M) * 10000),
+    "HIGH-BBDW": r4((D - N) * 10000),
+
+    "LOW-200": r4((E - Q) * 10000),
+    "LOW-50": r4((E - P) * 10000),
+    "LOW-21": r4((E - O) * 10000),
+    "LOW-BBUP": r4((E - L) * 10000),
+    "LOW-BBMID": r4((E - M) * 10000),
+    "LOW-BBDW": r4((E - N) * 10000),
+  };
+}
+
+async function calcularYBuscarSimilar() {
+  const mensaje = document.getElementById("mensajeCalculadora");
+  const resultado = document.getElementById("resultadoCalculadora");
+  mensaje.textContent = "";
+  resultado.style.display = "none";
+
+  const texto = document.getElementById("calcTexto").value;
+  const valoresBase = parsearTextoCalculadora(texto);
+
+  const camposRequeridos = [
+    "OPEN", "HIGH", "LOW", "CLOSE",
+    "RSI", "ATR", "EMA_21", "SMMA_21", "SMMA_50", "SMMA_200",
+    "MACD_MAIN", "MACD_SIGNAL", "BB_UP", "BB_MID", "BB_DW",
+  ];
+  const faltantes = camposRequeridos.filter((c) => valoresBase[c] === undefined);
+  if (faltantes.length > 0) {
+    mensaje.textContent = "Faltan estos datos: " + faltantes.join(", ");
+    return;
+  }
+
+  const derivadas = calcularVariablesDerivadas(valoresBase);
+  const variablesCompletas = { ...valoresBase, ...derivadas };
+  delete variablesCompletas.OPEN;
+  delete variablesCompletas.HIGH;
+  delete variablesCompletas.LOW;
+  delete variablesCompletas.CLOSE;
+  delete variablesCompletas.VOLUME; // estas van aparte, no forman parte de "variables"
+
+  mensaje.textContent = "Buscando el punto más parecido…";
+
+  const { data: todasLasVelas, error: errorVelas } = await supabaseClient
+    .from("candles")
+    .select("variables");
+
+  if (errorVelas) {
+    mensaje.textContent = "Error trayendo velas para normalizar: " + errorVelas.message;
+    return;
+  }
+
+  const minMax = {};
+  for (const fila of todasLasVelas) {
+    for (const [clave, valor] of Object.entries(fila.variables || {})) {
+      if (valor === null || valor === undefined) continue;
+      if (!minMax[clave]) minMax[clave] = [valor, valor];
+      minMax[clave][0] = Math.min(minMax[clave][0], valor);
+      minMax[clave][1] = Math.max(minMax[clave][1], valor);
+    }
+  }
+
+  const { data: puntos, error: errorPuntos } = await supabaseClient
+    .from("points")
+    .select("id, tipo, nota, candles(id, symbol, timeframe, timestamp, variables)");
+
+  if (errorPuntos) {
+    mensaje.textContent = "Error trayendo puntos: " + errorPuntos.message;
+    return;
+  }
+
+  if (!puntos || puntos.length === 0) {
+    mensaje.textContent = "Todavía no hay puntos marcados para comparar.";
+    return;
+  }
+
+  const candidatos = puntos
+    .filter((p) => p.candles)
+    .map((p) => {
+      const otras = p.candles.variables || {};
+      let sumaPct = 0;
+      let contador = 0;
+      const detalle = [];
+
+      for (const clave of Object.keys(minMax)) {
+        const v1 = variablesCompletas[clave];
+        const v2 = otras[clave];
+        if (v1 === undefined || v2 === undefined) continue;
+
+        const [min, max] = minMax[clave];
+        const rango = max - min || 1;
+        const diffRaw = v2 - v1;
+        const diffPct = (Math.abs(diffRaw) / rango) * 100;
+
+        sumaPct += diffPct;
+        contador++;
+        detalle.push({ variable: clave, v1, v2, diffRaw, diffPct });
+      }
+
+      const promedio = contador > 0 ? sumaPct / contador : 100;
+      return { punto: p, promedio, detalle };
+    });
+
+  candidatos.sort((a, b) => a.promedio - b.promedio);
+  const mejor = candidatos[0];
+
+  mensaje.textContent = "";
+  mostrarResultadoCalculadora(mejor);
+}
+
+function mostrarResultadoCalculadora(mejor) {
+  const resultado = document.getElementById("resultadoCalculadora");
+  resultado.style.display = "block";
+
+  const c = mejor.punto.candles;
+  document.getElementById("infoCalculadoraSimilar").textContent =
+    `${c.symbol} ${c.timeframe} — ${c.timestamp.replace("T", " ").slice(0, 16)} | ` +
+    `Tipo: ${mejor.punto.tipo.toUpperCase()}` +
+    (mejor.punto.nota ? ` | Nota: ${mejor.punto.nota}` : "");
+
+  document.getElementById("porcentajeCalculadora").textContent =
+    mejor.promedio.toFixed(2) + "%" + (mejor.promedio === 0 ? " (coincidencia exacta)" : "");
+
+  const cuerpo = document.querySelector("#tablaVariablesCalculadora tbody");
+  cuerpo.innerHTML = "";
+
+  const detalleOrdenado = [...mejor.detalle].sort((a, b) => b.diffPct - a.diffPct);
+
+  for (const d of detalleOrdenado) {
+    const fila = document.createElement("tr");
+    if (d.diffRaw === 0) fila.classList.add("match-exact");
+
+    const direccion = d.diffRaw > 0 ? "arriba" : d.diffRaw < 0 ? "abajo" : "igual";
+
+    fila.innerHTML = `
+      <td>${d.variable}</td>
+      <td>${d.v1}</td>
+      <td>${d.v2}</td>
+      <td>${d.diffRaw.toFixed(4)} (${direccion})</td>
+      <td>${d.diffPct.toFixed(2)}%</td>
+    `;
+    cuerpo.appendChild(fila);
+  }
+}
+
+document.getElementById("btnAbrirCalculadora").addEventListener("click", () => {
+  const calc = document.getElementById("calculadora");
+  calc.style.display = calc.style.display === "none" ? "block" : "none";
+});
+document.getElementById("btnCalcularSimilar").addEventListener("click", calcularYBuscarSimilar);
 
 revisarSesion();
