@@ -74,58 +74,6 @@
 
       <button id="btnBuscar" class="btn btn-primary btn-block">Buscar vela</button>
 
-      <div id="resultado" class="reveal" style="display:none;">
-
-        <div class="candle-info">
-          <span class="candle-label">Vela encontrada</span>
-          <p id="infoVela" class="candle-values"></p>
-        </div>
-
-        <div class="chart-card">
-          <span class="chart-title">Vela buscada (contexto ±40 velas)</span>
-          <div id="chart"></div>
-        </div>
-
-        <div class="field">
-          <label for="nota">Nota (opcional)</label>
-          <textarea id="nota" rows="2"></textarea>
-        </div>
-
-        <div class="button-grid">
-          <button id="btnBuyO" class="btn btn-buy">Buy O</button>
-          <button id="btnBuyX" class="btn btn-buy btn-outline">Buy X</button>
-          <button id="btnSellO" class="btn btn-sell">Sell O</button>
-          <button id="btnSellX" class="btn btn-sell btn-outline">Sell X</button>
-        </div>
-
-        <p id="mensajeMarcado" class="msg"></p>
-
-        <div class="divider"></div>
-
-        <button id="btnSimilar" class="btn btn-secondary btn-block">Buscar punto similar</button>
-        <p id="cargandoSimilar" class="msg msg-loading" style="display:none;">Buscando entre los puntos marcados…</p>
-
-        <div id="resultadoSimilar" class="reveal" style="display:none;">
-          <div class="candle-info">
-            <span class="candle-label">Punto más parecido</span>
-            <p id="infoSimilar" class="candle-values"></p>
-          </div>
-
-          <div class="score-row">
-            <span class="score-label">Diferencia total</span>
-            <span id="porcentajeTotal" class="score-value"></span>
-          </div>
-
-          <div class="table-scroll">
-            <table id="tablaVariables">
-              <thead>
-                <tr><th>Variable</th><th>Actual</th><th>Encontrado</th><th>Dif.</th><th>%</th></tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
       <div class="divider"></div>
 
       <button id="btnVerPuntos" class="btn btn-secondary btn-block">Ver puntos marcados</button>
@@ -145,6 +93,41 @@
         </div>
 
         <div id="puntosContenedor"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <button id="btnAbrirCalculadora" class="btn btn-secondary btn-block">Calculadora</button>
+
+      <div id="calculadora" class="reveal" style="display:none;">
+        <div class="field">
+          <label for="calcTexto">Pega aquí el bloque de variables (se ignoran SYMBOL, TIMEFRAME y DATE)</label>
+          <textarea id="calcTexto" rows="12" placeholder="SYMBOL: AUDUSD&#10;TIMEFRAME: M15&#10;&#10;DATE: 2026.08.19 16:00&#10;&#10;OPEN: 0.70990&#10;HIGH: 0.71215&#10;LOW: 0.70988&#10;CLOSE: 0.71197&#10;VOLUME: 6826&#10;&#10;RSI: 83.00&#10;ATR: 0.00065&#10;&#10;MACD MAIN: 0.00059&#10;MACD SIGNAL: 0.00013&#10;&#10;BB UPPER: 0.71026&#10;BB MIDDLE: 0.70817&#10;BB LOWER: 0.70607&#10;&#10;SMMA 21: 0.70808&#10;SMMA 50: 0.70841&#10;SMMA 200: 0.70853&#10;EMA 21: 0.70836"></textarea>
+        </div>
+
+        <button id="btnCalcularSimilar" class="btn btn-primary btn-block">Calcular y buscar similar</button>
+        <p id="mensajeCalculadora" class="msg"></p>
+
+        <div id="resultadoCalculadora" class="reveal" style="display:none;">
+          <div class="candle-info">
+            <span class="candle-label">Punto más parecido</span>
+            <p id="infoCalculadoraSimilar" class="candle-values"></p>
+          </div>
+
+          <div class="score-row">
+            <span class="score-label">Diferencia total</span>
+            <span id="porcentajeCalculadora" class="score-value"></span>
+          </div>
+
+          <div class="table-scroll">
+            <table id="tablaVariablesCalculadora">
+              <thead>
+                <tr><th>Variable</th><th>Ingresado</th><th>Encontrado</th><th>Dif.</th><th>%</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -196,6 +179,48 @@
 
       <div id="variablesVelaDetalle" class="variables-grid"></div>
 
+      <div id="accionesDesdeBusqueda" style="display:none; margin-top:18px;">
+        <div class="field">
+          <label for="notaDetalle">Nota (opcional)</label>
+          <textarea id="notaDetalle" rows="2"></textarea>
+        </div>
+
+        <div class="button-grid">
+          <button id="btnBuyODetalle" class="btn btn-buy">Buy O</button>
+          <button id="btnBuyXDetalle" class="btn btn-buy btn-outline">Buy X</button>
+          <button id="btnSellODetalle" class="btn btn-sell">Sell O</button>
+          <button id="btnSellXDetalle" class="btn btn-sell btn-outline">Sell X</button>
+        </div>
+
+        <p id="mensajeMarcadoDetalle" class="msg"></p>
+
+        <div class="divider"></div>
+
+        <button id="btnSimilarDetalle" class="btn btn-secondary btn-block">Buscar punto similar (entre marcados)</button>
+        <p id="cargandoSimilarDetalle" class="msg msg-loading" style="display:none;">Buscando entre los puntos marcados…</p>
+
+        <div id="resultadoSimilarDetalle" class="reveal" style="display:none;">
+          <div class="candle-info">
+            <span class="candle-label">Punto más parecido</span>
+            <p id="infoSimilarDetalle" class="candle-values"></p>
+          </div>
+
+          <div class="score-row">
+            <span class="score-label">Diferencia total</span>
+            <span id="porcentajeTotalDetalle" class="score-value"></span>
+          </div>
+
+          <div class="table-scroll">
+            <table id="tablaVariablesDetalle">
+              <thead>
+                <tr><th>Variable</th><th>Actual</th><th>Encontrado</th><th>Dif.</th><th>%</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <div class="divider"></div>
 
       <button id="btnSimilaresGlobal" class="btn btn-secondary btn-block">Buscar puntos similares</button>
@@ -238,6 +263,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
