@@ -1251,7 +1251,7 @@ async function calcularYBuscarSimilar() {
   delete variablesCompletas.CLOSE;
   delete variablesCompletas.VOLUME; // estas van aparte, no forman parte de "variables"
 
-  mensaje.textContent = "Buscando el punto más parecido…";
+  mensaje.textContent = "Buscando puntos parecidos…";
 
   const { data: todasLasVelas, error: errorVelas } = await supabaseClient
     .from("candles")
@@ -1272,88 +1272,90 @@ async function calcularYBuscarSimilar() {
     }
   }
 
-  const { data: puntos, error: errorPuntos } = await supabaseClient
+  const { data: candidatas, error: errorCand } = await supabaseClient
+    .from("candles")
+    .select("id, symbol, timeframe, timestamp, variables");
+
+  if (errorCand) {
+    mensaje.textContent = "Error trayendo velas: " + errorCand.message;
+    return;
+  }
+
+  // Resultado (si existe) de los puntos ya marcados, para mostrar si cada
+  // vela parecida fue exitosa, fallida, o todavía no se evaluó.
+  const { data: puntosExistentes, error: errorPuntos } = await supabaseClient
     .from("points")
-    .select("id, tipo, nota, candles(id, symbol, timeframe, timestamp, variables)");
+    .select("candle_id, resultado");
 
   if (errorPuntos) {
     mensaje.textContent = "Error trayendo puntos: " + errorPuntos.message;
     return;
   }
 
-  if (!puntos || puntos.length === 0) {
-    mensaje.textContent = "Todavía no hay puntos marcados para comparar.";
+  const resultadoPorCandleId = new Map();
+  for (const p of puntosExistentes) {
+    resultadoPorCandleId.set(p.candle_id, p.resultado || "pendiente");
+  }
+
+  const resultados = (candidatas || []).map((c) => {
+    let suma = 0;
+    let contador = 0;
+    for (const clave of Object.keys(minMax)) {
+      const v1 = variablesCompletas[clave];
+      const v2 = c.variables[clave];
+      if (v1 === undefined || v2 === undefined) continue;
+      const [min, max] = minMax[clave];
+      const rango = max - min || 1;
+      suma += (Math.abs(v2 - v1) / rango) * 100;
+      contador++;
+    }
+    const promedio = contador > 0 ? suma / contador : 100;
+    return { candle: c, promedio, estado: resultadoPorCandleId.get(c.id) || "no evaluado" };
+  });
+
+  resultados.sort((a, b) => a.promedio - b.promedio);
+  const top = resultados.slice(0, 15);
+
+  mensaje.textContent = "";
+
+  if (top.length === 0) {
+    mensaje.textContent = "No se encontraron velas para comparar.";
     return;
   }
 
-  const candidatos = puntos
-    .filter((p) => p.candles)
-    .map((p) => {
-      const otras = p.candles.variables || {};
-      let sumaPct = 0;
-      let contador = 0;
-      const detalle = [];
-
-      for (const clave of Object.keys(minMax)) {
-        const v1 = variablesCompletas[clave];
-        const v2 = otras[clave];
-        if (v1 === undefined || v2 === undefined) continue;
-
-        const [min, max] = minMax[clave];
-        const rango = max - min || 1;
-        const diffRaw = v2 - v1;
-        const diffPct = (Math.abs(diffRaw) / rango) * 100;
-
-        sumaPct += diffPct;
-        contador++;
-        detalle.push({ variable: clave, v1, v2, diffRaw, diffPct });
-      }
-
-      const promedio = contador > 0 ? sumaPct / contador : 100;
-      return { punto: p, promedio, detalle };
-    });
-
-  candidatos.sort((a, b) => a.promedio - b.promedio);
-  const mejor = candidatos[0];
-
-  mensaje.textContent = "";
-  mostrarResultadoCalculadora(mejor);
+  mostrarResultadoCalculadora(top);
 }
 
-function mostrarResultadoCalculadora(mejor) {
-  const resultado = document.getElementById("resultadoCalculadora");
-  resultado.style.display = "block";
-
-  const c = mejor.punto.candles;
-  document.getElementById("infoCalculadoraSimilar").textContent =
-    `${c.symbol} ${c.timeframe} — ${c.timestamp.replace("T", " ").slice(0, 16)} | ` +
-    `Tipo: ${mejor.punto.tipo.toUpperCase()}` +
-    (mejor.punto.nota ? ` | Nota: ${mejor.punto.nota}` : "");
-
+function mostrarResultadoCalculadora(lista) {
+  document.getElementById("resultadoCalculadora").style.display = "block";
   document.getElementById("porcentajeCalculadora").textContent =
-    mejor.promedio.toFixed(2) + "%" + (mejor.promedio === 0 ? " (coincidencia exacta)" : "");
+    lista[0].promedio.toFixed(2) + "%" + (lista[0].promedio === 0 ? " (coincidencia exacta)" : "");
 
-  const cuerpo = document.querySelector("#tablaVariablesCalculadora tbody");
-  cuerpo.innerHTML = "";
+  const contenedor = document.getElementById("listaCalculadora");
+  contenedor.innerHTML = "";
 
-  const detalleOrdenado = [...mejor.detalle].sort((a, b) => b.diffPct - a.diffPct);
-
-  for (const d of detalleOrdenado) {
-    const fila = document.createElement("tr");
-    if (d.diffRaw === 0) fila.classList.add("match-exact");
-
-    const direccion = d.diffRaw > 0 ? "arriba" : d.diffRaw < 0 ? "abajo" : "igual";
-
-    fila.innerHTML = `
-      <td>${d.variable}</td>
-      <td>${d.v1}</td>
-      <td>${d.v2}</td>
-      <td>${d.diffRaw.toFixed(4)} (${direccion})</td>
-      <td>${d.diffPct.toFixed(2)}%</td>
+  lista.forEach((item, i) => {
+    const el = document.createElement("div");
+    el.className = "similar-item";
+    el.dataset.candleId = item.candle.id;
+    el.dataset.estado = item.estado;
+    el.innerHTML = `
+      <div class="sim-top">
+        <span>#${i + 1} — ${item.candle.symbol} ${item.candle.timeframe}</span>
+        <span class="sim-pct">${item.promedio.toFixed(2)}% dif. · <span class="sim-estado sim-estado-${item.estado.replace(/\s+/g, "-")}">${item.estado}</span></span>
+      </div>
+      <span class="sim-fecha">${item.candle.timestamp.replace("T", " ").slice(0, 16)}</span>
     `;
-    cuerpo.appendChild(fila);
-  }
+    contenedor.appendChild(el);
+  });
 }
+
+// Al tocar una de las velas parecidas, se abre el mismo detalle completo
+// (gráfico + indicadores + variables) que al seleccionar un punto marcado.
+document.getElementById("listaCalculadora").addEventListener("click", (evento) => {
+  const item = evento.target.closest(".similar-item");
+  if (item) verDetallePunto(item.dataset.candleId, item.dataset.estado);
+});
 
 document.getElementById("btnAbrirCalculadora").addEventListener("click", () => {
   const calc = document.getElementById("calculadora");
