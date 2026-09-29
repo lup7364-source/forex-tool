@@ -109,24 +109,11 @@
         <p id="mensajeCalculadora" class="msg"></p>
 
         <div id="resultadoCalculadora" class="reveal" style="display:none;">
-          <div class="candle-info">
-            <span class="candle-label">Punto más parecido</span>
-            <p id="infoCalculadoraSimilar" class="candle-values"></p>
-          </div>
-
           <div class="score-row">
-            <span class="score-label">Diferencia total</span>
+            <span class="score-label">Mejor coincidencia</span>
             <span id="porcentajeCalculadora" class="score-value"></span>
           </div>
-
-          <div class="table-scroll">
-            <table id="tablaVariablesCalculadora">
-              <thead>
-                <tr><th>Variable</th><th>Ingresado</th><th>Encontrado</th><th>Dif.</th><th>%</th></tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div id="listaCalculadora"></div>
         </div>
       </div>
     </section>
@@ -263,6 +250,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
