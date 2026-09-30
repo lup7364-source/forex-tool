@@ -21,6 +21,8 @@
 
 * { box-sizing: border-box; }
 
+html { -webkit-text-size-adjust: 100%; }
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -108,21 +110,31 @@ label {
   font-weight: 500;
 }
 
-input, select, textarea {
+/* Los checkboxes quedan excluidos: antes heredaban width:100% y padding
+   y se descuadraban en el celular. */
+input:not([type="checkbox"]), select, textarea {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
   padding: 10px 11px;
-  font-size: 15px;
+  font-size: 16px; /* 16px evita el zoom automático de iOS al tocar un campo */
   font-family: inherit;
   width: 100%;
   transition: border-color 0.15s ease;
 }
 
-input:focus, select:focus, textarea:focus {
+input:not([type="checkbox"]):focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--teal);
+}
+
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
 }
 
 textarea { resize: vertical; }
@@ -131,14 +143,17 @@ textarea { resize: vertical; }
 
 .btn {
   appearance: none;
+  -webkit-appearance: none;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 11px 16px;
+  min-height: 44px;
   font-size: 14px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: filter 0.15s ease, transform 0.05s ease;
+  touch-action: manipulation;
 }
 
 .btn:active { transform: scale(0.98); }
@@ -159,6 +174,7 @@ textarea { resize: vertical; }
   border-color: var(--border);
   color: var(--text-muted);
   padding: 7px 12px;
+  min-height: 36px;
   font-size: 13px;
 }
 .btn-ghost:hover { border-color: var(--border-strong); color: var(--text); }
@@ -201,6 +217,7 @@ textarea { resize: vertical; }
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .msg { font-size: 13px; color: var(--teal); min-height: 1em; margin: 8px 0 0; }
@@ -212,12 +229,16 @@ textarea { resize: vertical; }
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   margin-bottom: 14px;
 }
+
+.score-row .btn { flex: 0 0 auto; }
 
 .score-label { font-size: 12px; color: var(--text-muted); }
 .score-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--teal); }
@@ -266,6 +287,8 @@ textarea { resize: vertical; }
 
 .punto-pendiente .punto-resultado { color: var(--text-muted); }
 
+/* ---------- Overlay de detalle ---------- */
+
 .overlay-page {
   display: none;
   position: fixed;
@@ -273,6 +296,7 @@ textarea { resize: vertical; }
   background: var(--bg);
   z-index: 100;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 16px;
 }
 
@@ -330,15 +354,12 @@ textarea { resize: vertical; }
   width: 100%;
 }
 
-@media (min-width: 640px) {
-  .wrap { max-width: 720px; }
-  .overlay-inner .candle-info { margin: 16px 0; }
-}
+/* ---------- Checkboxes de indicadores ---------- */
 
 .indicadores-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 10px 16px;
   margin-bottom: 16px;
   font-size: 13px;
   color: var(--text-muted);
@@ -348,15 +369,21 @@ textarea { resize: vertical; }
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 32px;
   cursor: pointer;
   white-space: nowrap;
+  font-size: 13px;
+  font-weight: 400;
+  color: inherit;
 }
 .indicadores-row input { accent-color: var(--teal); }
 
 /* Checkboxes de indicadores para el punto similar: en rojo para diferenciarlos
    de los del punto original (gris/teal/variado). */
-.lbl-similar { color: var(--rose); }
+.lbl-similar { color: var(--rose) !important; }
 .lbl-similar input { accent-color: var(--rose); }
+
+/* ---------- Lista de similares ---------- */
 
 .similar-item {
   display: flex;
@@ -374,6 +401,8 @@ textarea { resize: vertical; }
 .similar-item .sim-top {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px 10px;
   font-size: 13px;
 }
 
@@ -388,7 +417,7 @@ textarea { resize: vertical; }
 
 /* ---------- Table ---------- */
 
-.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 
 table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
@@ -413,4 +442,45 @@ tr:last-child td { border-bottom: none; }
 tr.match-exact td {
   background: var(--teal-dim);
   color: var(--teal);
+}
+
+/* ---------- Pantallas grandes ---------- */
+
+@media (min-width: 640px) {
+  .wrap { max-width: 720px; }
+  .overlay-inner .candle-info { margin: 16px 0; }
+}
+
+/* ---------- Celular ---------- */
+
+@media (max-width: 480px) {
+  .topbar { padding: 12px 14px; }
+  .wrap { padding: 14px 12px 48px; }
+  .card { padding: 16px; }
+  .card-narrow { margin-top: 24px; }
+
+  .overlay-page { padding: 12px; }
+
+  /* Buy O / Buy X / Sell O / Sell X */
+  .button-grid .btn { padding: 14px 8px; }
+
+  /* Lista de puntos marcados */
+  .punto-item { flex-wrap: wrap; }
+  .punto-fecha { flex-basis: 100%; order: 3; }
+
+  /* Tarjetas de variables: 3 por fila */
+  .variables-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .variable-card { min-width: 0; padding: 8px 10px; }
+  .variable-card .v-nombre {
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .variable-card .v-valor { font-size: 14px; }
+
+  .chart-card-lg #chart, .chart-card-lg #chartDetalle { min-height: 300px; }
 }
