@@ -21,7 +21,7 @@ Uso:
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
@@ -66,6 +66,12 @@ def parsear_timestamp(valor):
     return dt.replace(tzinfo=None)
 
 
+# Tu MT4/TradingView trabajan en UTC+3. Twelve Data, si no se le pide otra
+# cosa, entrega forex en horario de Sídney (Australia) por defecto — por eso
+# se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
+HORAS_BROKER_RESPECTO_A_UTC = 3
+
+
 def traer_velas_twelve_data(api_key, outputsize=500):
     respuesta = requests.get(
         "https://api.twelvedata.com/time_series",
@@ -73,6 +79,7 @@ def traer_velas_twelve_data(api_key, outputsize=500):
             "symbol": TWELVE_DATA_SYMBOL,
             "interval": TWELVE_DATA_INTERVAL,
             "outputsize": outputsize,
+            "timezone": "UTC",
             "apikey": api_key,
         },
         timeout=30,
@@ -84,8 +91,10 @@ def traer_velas_twelve_data(api_key, outputsize=500):
 
     velas = []
     for v in reversed(datos["values"]):  # Twelve Data da lo más reciente primero
+        ts_utc = datetime.strptime(v["datetime"], "%Y-%m-%d %H:%M:%S")
+        ts_broker = ts_utc + timedelta(hours=HORAS_BROKER_RESPECTO_A_UTC)
         velas.append({
-            "timestamp": datetime.strptime(v["datetime"], "%Y-%m-%d %H:%M:%S"),
+            "timestamp": ts_broker,
             "open": float(v["open"]),
             "high": float(v["high"]),
             "low": float(v["low"]),
