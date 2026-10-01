@@ -1119,6 +1119,248 @@ document.getElementById("btnSellODetalle").addEventListener("click", () => marca
 document.getElementById("btnSellXDetalle").addEventListener("click", () => marcarPunto("sell", "malo"));
 document.getElementById("btnSimilarDetalle").addEventListener("click", buscarPuntoSimilar);
 
+// ---------- Datos en vivo desde Twelve Data (para usar la Calculadora sin estar en la PC con MT4) ----------
+
+// Tu MT4/TradingView trabajan en UTC+3. Twelve Data, si no se le pide otra
+// cosa, entrega forex en horario de Sídney (Australia) por defecto — por
+// eso se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
+const HORAS_BROKER_RESPECTO_A_UTC = 3;
+
+function ajustarZonaHoraria(datetimeStr, horas) {
+  const fecha = new Date(datetimeStr.replace(" ", "T") + "Z"); // Twelve Data ya viene en UTC
+  fecha.setUTCHours(fecha.getUTCHours() + horas);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${fecha.getUTCFullYear()}-${pad(fecha.getUTCMonth() + 1)}-${pad(fecha.getUTCDate())} ${pad(fecha.getUTCHours())}:${pad(fecha.getUTCMinutes())}:${pad(fecha.getUTCSeconds())}`;
+}
+
+async function obtenerVelasTwelveData(apiKey, outputsize = 300) {
+  const url = `https://api.twelvedata.com/time_series?symbol=AUD/USD&interval=15min&outputsize=${outputsize}&timezone=UTC&apikey=${encodeURIComponent(apiKey)}`;
+  const respuesta = await fetch(url);
+  const datos = await respuesta.json();
+
+  if (datos.status === "error" || !datos.values) {
+    throw new Error(datos.message || "Twelve Data no devolvió datos.");
+  }
+
+  // Twelve Data devuelve lo más reciente primero; se invierte para tener orden cronológico.
+  return datos.values
+    .map((v) => ({
+      timestamp: ajustarZonaHoraria(v.datetime, HORAS_BROKER_RESPECTO_A_UTC),
+      open: parseFloat(v.open),
+      high: parseFloat(v.high),
+      low: parseFloat(v.low),
+      close: parseFloat(v.close),
+      volume: v.volume ? parseFloat(v.volume) : 0,
+    }))
+    .reverse();
+}
+
+// EMA de toda la serie (con "null" mientras no hay suficientes datos para empezar).
+function serieEMA(valores, periodo) {
+  const k = 2 / (periodo + 1);
+  const resultado = new Array(valores.length).fill(null);
+  let ema = null;
+
+  for (let i = 0; i < valores.length; i++) {
+    if (i < periodo - 1) continue;
+    if (ema === null) {
+      let suma = 0;
+      for (let j = i - periodo + 1; j <= i; j++) suma += valores[j];
+      ema = suma / periodo; // semilla: SMA de los primeros "periodo" valores
+    } else {
+      ema = valores[i] * k + ema * (1 - k);
+    }
+    resultado[i] = ema;
+  }
+  return resultado;
+}
+
+function calcularRSI(closes, periodo = 14) {
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 1; i <= periodo; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) avgGain += diff;
+    else avgLoss += -diff;
+  }
+  avgGain /= periodo;
+  avgLoss /= periodo;
+
+  for (let i = periodo + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (periodo - 1) + gain) / periodo;
+    avgLoss = (avgLoss * (periodo - 1) + loss) / periodo;
+  }
+
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - 100 / (1 + rs);
+}
+
+function calcularATR(highs, lows, closes, periodo = 14) {
+  const tr = [];
+  for (let i = 1; i < highs.length; i++) {
+    const h = highs[i], l = lows[i], pc = closes[i - 1];
+    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  let atr = tr.slice(0, periodo).reduce((a, b) => a + b, 0) / periodo;
+  for (let i = periodo; i < tr.length; i++) {
+    atr = (atr * (periodo - 1) + tr[i]) / periodo;
+  }
+  return atr;
+}
+
+// SMMA (suavizado de Wilder): misma fórmula recursiva que usa MT4.
+function calcularSMMA(closes, periodo) {
+  let smma = closes.slice(0, periodo).reduce((a, b) => a + b, 0) / periodo;
+  for (let i = periodo; i < closes.length; i++) {
+    smma = (smma * (periodo - 1) + closes[i]) / periodo;
+  }
+  return smma;
+}
+
+function calcularMACD(closes, rapida = 12, lenta = 26, señal = 9) {
+  const emaRapida = serieEMA(closes, rapida);
+  const emaLenta = serieEMA(closes, lenta);
+  const macdLinea = closes
+    .map((_, i) => (emaRapida[i] !== null && emaLenta[i] !== null ? emaRapida[i] - emaLenta[i] : null))
+    .filter((v) => v !== null);
+  const señalSerie = serieEMA(macdLinea, señal);
+
+  return {
+    main: macdLinea[macdLinea.length - 1],
+    signal: señalSerie[señalSerie.length - 1],
+  };
+}
+
+function calcularBollinger(closes, periodo = 20, desviaciones = 2) {
+  const ultimos = closes.slice(-periodo);
+  const media = ultimos.reduce((a, b) => a + b, 0) / periodo;
+  const varianza = ultimos.reduce((a, b) => a + (b - media) ** 2, 0) / periodo;
+  const desviacion = Math.sqrt(varianza);
+  return {
+    up: media + desviaciones * desviacion,
+    mid: media,
+    dw: media - desviaciones * desviacion,
+  };
+}
+
+// Junta todo: recibe las velas históricas (orden cronológico) y devuelve el
+// mismo set de 16 variables base que se pega manualmente en la Calculadora.
+function calcularIndicadoresActuales(velas) {
+  const closes = velas.map((v) => v.close);
+  const highs = velas.map((v) => v.high);
+  const lows = velas.map((v) => v.low);
+  const ultima = velas[velas.length - 1];
+
+  const emaSerie21 = serieEMA(closes, 21);
+  const { main: macdMain, signal: macdSignal } = calcularMACD(closes, 12, 26, 9);
+  const { up: bbUp, mid: bbMid, dw: bbDw } = calcularBollinger(closes, 20, 2);
+
+  return {
+    OPEN: ultima.open,
+    HIGH: ultima.high,
+    LOW: ultima.low,
+    CLOSE: ultima.close,
+    VOLUME: ultima.volume,
+    RSI: calcularRSI(closes, 14),
+    ATR: calcularATR(highs, lows, closes, 14),
+    EMA_21: emaSerie21[emaSerie21.length - 1],
+    SMMA_21: calcularSMMA(closes, 21),
+    SMMA_50: calcularSMMA(closes, 50),
+    SMMA_200: calcularSMMA(closes, 200),
+    MACD_MAIN: macdMain,
+    MACD_SIGNAL: macdSignal,
+    BB_UP: bbUp,
+    BB_MID: bbMid,
+    BB_DW: bbDw,
+    timestamp: ultima.timestamp,
+  };
+}
+
+function formatearFechaTwelveData(datetimeStr) {
+  const [fecha, hora] = datetimeStr.split(" ");
+  return `${fecha.replace(/-/g, ".")} ${(hora || "00:00:00").slice(0, 5)}`;
+}
+
+// Arma el mismo bloque de texto que normalmente pegas a mano, para que quede
+// visible/copiable y además se reutiliza el mismo parser de siempre.
+function formatearBloqueCalculadora(v) {
+  const f = (n, d) => Number(n).toFixed(d);
+  return [
+    "SYMBOL: AUDUSD",
+    "TIMEFRAME: M15",
+    "",
+    `DATE: ${formatearFechaTwelveData(v.timestamp)}`,
+    "",
+    `OPEN: ${f(v.OPEN, 5)}`,
+    `HIGH: ${f(v.HIGH, 5)}`,
+    `LOW: ${f(v.LOW, 5)}`,
+    `CLOSE: ${f(v.CLOSE, 5)}`,
+    `VOLUME: ${Math.round(v.VOLUME)}`,
+    "",
+    `RSI: ${f(v.RSI, 2)}`,
+    `ATR: ${f(v.ATR, 5)}`,
+    "",
+    `MACD MAIN: ${f(v.MACD_MAIN, 5)}`,
+    `MACD SIGNAL: ${f(v.MACD_SIGNAL, 5)}`,
+    "",
+    `BB UPPER: ${f(v.BB_UP, 5)}`,
+    `BB MIDDLE: ${f(v.BB_MID, 5)}`,
+    `BB LOWER: ${f(v.BB_DW, 5)}`,
+    "",
+    `SMMA 21: ${f(v.SMMA_21, 5)}`,
+    `SMMA 50: ${f(v.SMMA_50, 5)}`,
+    `SMMA 200: ${f(v.SMMA_200, 5)}`,
+    `EMA 21: ${f(v.EMA_21, 5)}`,
+  ].join("\n");
+}
+
+async function obtenerDatosActualesYCalcular() {
+  const mensaje = document.getElementById("mensajeObtenerDatos");
+  const apiKey = document.getElementById("claveTwelveData").value.trim();
+
+  if (!apiKey) {
+    mensaje.textContent = "Pega tu API key de Twelve Data primero.";
+    return;
+  }
+  localStorage.setItem("claveTwelveData", apiKey);
+
+  mensaje.textContent = "Trayendo velas de Twelve Data…";
+
+  try {
+    const velas = await obtenerVelasTwelveData(apiKey, 300);
+
+    if (velas.length < 60) {
+      mensaje.textContent = "Twelve Data devolvió muy pocas velas, no se puede calcular.";
+      return;
+    }
+
+    const indicadores = calcularIndicadoresActuales(velas);
+    document.getElementById("calcTexto").value = formatearBloqueCalculadora(indicadores);
+
+    mensaje.textContent =
+      velas.length < 210
+        ? `Listo (solo ${velas.length} velas de historial; SMMA 200 puede no ser tan preciso). Buscando similares…`
+        : "";
+
+    await calcularYBuscarSimilar();
+  } catch (err) {
+    mensaje.textContent = "Error: " + err.message;
+    console.error(err);
+  }
+}
+
+document.getElementById("btnObtenerDatos").addEventListener("click", obtenerDatosActualesYCalcular);
+
+// Recordar el API key entre visitas (solo queda guardado en este navegador).
+const claveTwelveDataGuardada = localStorage.getItem("claveTwelveData");
+if (claveTwelveDataGuardada) {
+  document.getElementById("claveTwelveData").value = claveTwelveDataGuardada;
+}
+
 // ---------- Calculadora: pegar variables sueltas (sin fecha) y buscar el punto más parecido ----------
 
 // Cada etiqueta posible (con o sin espacio/guión bajo, con o sin ":") se
