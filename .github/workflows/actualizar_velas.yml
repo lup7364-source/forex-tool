@@ -27,6 +27,12 @@ jobs:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
         run: python actualizar_velas.py
 
+      - name: Ejecutar evaluar_resultados.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python evaluar_resultados.py AUDUSD M15
+
       - name: Ejecutar detectar_puntos_similares.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
