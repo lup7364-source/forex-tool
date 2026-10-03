@@ -100,6 +100,16 @@
       <button id="btnAbrirCalculadora" class="btn btn-secondary btn-block">Calculadora</button>
 
       <div id="calculadora" class="reveal" style="display:none;">
+
+        <div class="field">
+          <label for="claveTwelveData">API key de Twelve Data (se guarda solo en este navegador)</label>
+          <input type="password" id="claveTwelveData" placeholder="Pega tu API key">
+        </div>
+        <button id="btnObtenerDatos" class="btn btn-secondary btn-block">Traer última vela cerrada y buscar similar</button>
+        <p id="mensajeObtenerDatos" class="msg"></p>
+
+        <div class="divider"></div>
+
         <div class="field">
           <label for="calcTexto">Pega aquí el bloque de variables (se ignoran SYMBOL, TIMEFRAME y DATE)</label>
           <textarea id="calcTexto" rows="12" placeholder="SYMBOL: AUDUSD&#10;TIMEFRAME: M15&#10;&#10;DATE: 2026.08.19 16:00&#10;&#10;OPEN: 0.70990&#10;HIGH: 0.71215&#10;LOW: 0.70988&#10;CLOSE: 0.71197&#10;VOLUME: 6826&#10;&#10;RSI: 83.00&#10;ATR: 0.00065&#10;&#10;MACD MAIN: 0.00059&#10;MACD SIGNAL: 0.00013&#10;&#10;BB UPPER: 0.71026&#10;BB MIDDLE: 0.70817&#10;BB LOWER: 0.70607&#10;&#10;SMMA 21: 0.70808&#10;SMMA 50: 0.70841&#10;SMMA 200: 0.70853&#10;EMA 21: 0.70836"></textarea>
@@ -250,6 +260,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>
