@@ -206,25 +206,30 @@ function llenarSelectHoras() {
 }
 llenarSelectHoras();
 
-async function buscarPuntoSimilar() {
-  if (!velaDetalleActual) return;
+// ---------- Utilidades de datos (paginación y similitud) ----------
 
-  document.getElementById("cargandoSimilarDetalle").style.display = "block";
-  document.getElementById("resultadoSimilarDetalle").style.display = "none";
+// Supabase devuelve como máximo 1000 filas por consulta. Esta función pide
+// página tras página hasta traer TODO, para que las búsquedas de similares
+// comparen contra la base de datos completa y no solo contra las primeras 1000.
+async function traerPaginado(construirConsulta) {
+  const TAM_PAGINA = 1000;
+  const todas = [];
+  let desde = 0;
 
-  // 1. Traer todas las variables de todas las velas, para calcular el rango
-  //    (min/max) real de cada variable y así normalizar las diferencias.
-  const { data: todasLasVelas, error: errorVelas } = await supabaseClient
-    .from("candles")
-    .select("variables");
-
-  if (errorVelas) {
-    alert("Error trayendo velas para normalizar: " + errorVelas.message);
-    return;
+  while (true) {
+    const { data, error } = await construirConsulta().range(desde, desde + TAM_PAGINA - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    todas.push(...data);
+    desde += data.length;
   }
+  return todas;
+}
 
+// Rango (min/max) real de cada variable, para normalizar las diferencias.
+function calcularMinMax(velas) {
   const minMax = {};
-  for (const fila of todasLasVelas) {
+  for (const fila of velas) {
     for (const [clave, valor] of Object.entries(fila.variables || {})) {
       if (valor === null || valor === undefined) continue;
       if (!minMax[clave]) minMax[clave] = [valor, valor];
@@ -232,14 +237,83 @@ async function buscarPuntoSimilar() {
       minMax[clave][1] = Math.max(minMax[clave][1], valor);
     }
   }
+  return minMax;
+}
 
-  // 2. Traer todos los puntos marcados, con los datos de su vela
-  const { data: puntos, error: errorPuntos } = await supabaseClient
+// % promedio de diferencia entre dos conjuntos de variables (0% = idénticas).
+function compararVariables(actual, otras, minMax, conDetalle = false) {
+  let sumaPct = 0;
+  let contador = 0;
+  const detalle = [];
+
+  for (const clave of Object.keys(minMax)) {
+    const v1 = actual[clave];
+    const v2 = otras[clave];
+    if (v1 === undefined || v2 === undefined) continue;
+
+    const [min, max] = minMax[clave];
+    const rango = max - min || 1; // evita división por cero
+    const diffRaw = v2 - v1;
+    const diffPct = (Math.abs(diffRaw) / rango) * 100;
+
+    sumaPct += diffPct;
+    contador++;
+
+    if (conDetalle) detalle.push({ variable: clave, v1, v2, diffRaw, diffPct });
+  }
+
+  const promedio = contador > 0 ? sumaPct / contador : 100;
+  return { promedio, detalle };
+}
+
+// Resultado de cada vela que ya tiene un punto (manual o automático): exitoso / fallido / pendiente.
+function mapaResultadoPorVela(puntos) {
+  const mapa = new Map();
+  for (const p of puntos) {
+    mapa.set(p.candle_id, p.resultado || "pendiente");
+  }
+  return mapa;
+}
+
+// Texto para el título del detalle: dirección y resultado de los puntos de esa vela.
+async function textoEstadoDeVela(candleId) {
+  const { data, error } = await supabaseClient
     .from("points")
-    .select("id, tipo, nota, candles(id, symbol, timeframe, timestamp, variables)");
+    .select("direccion, resultado")
+    .eq("candle_id", candleId)
+    .order("id", { ascending: true });
 
-  if (errorPuntos) {
-    alert("Error trayendo puntos: " + errorPuntos.message);
+  if (error || !data || data.length === 0) return "sin marcar";
+  return data
+    .map((p) => `${(p.direccion || "?").toUpperCase()} ${p.resultado || "pendiente"}`)
+    .join(" / ");
+}
+
+async function buscarPuntoSimilar() {
+  if (!velaDetalleActual) return;
+
+  document.getElementById("cargandoSimilarDetalle").style.display = "block";
+  document.getElementById("resultadoSimilarDetalle").style.display = "none";
+
+  let minMax, puntos;
+  try {
+    // 1. Todas las variables de todas las velas, para el rango (min/max) real
+    //    de cada variable y así normalizar las diferencias.
+    const todasLasVelas = await traerPaginado(() =>
+      supabaseClient.from("candles").select("id, variables").order("id", { ascending: true })
+    );
+    minMax = calcularMinMax(todasLasVelas);
+
+    // 2. Todos los puntos marcados (manuales y automáticos), con los datos de su vela
+    puntos = await traerPaginado(() =>
+      supabaseClient
+        .from("points")
+        .select("id, tipo, nota, candles(id, symbol, timeframe, timestamp, variables)")
+        .order("id", { ascending: true })
+    );
+  } catch (error) {
+    document.getElementById("cargandoSimilarDetalle").style.display = "none";
+    alert("Error trayendo datos para comparar: " + error.message);
     return;
   }
 
@@ -255,35 +329,18 @@ async function buscarPuntoSimilar() {
   const candidatos = puntos
     .filter((p) => p.candles && p.candles.id !== velaDetalleActual.id) // no comparar contra sí misma
     .map((p) => {
-      const otras = p.candles.variables || {};
-      let sumaPct = 0;
-      let contador = 0;
-      const detalle = [];
-
-      for (const clave of Object.keys(minMax)) {
-        const v1 = actual[clave];
-        const v2 = otras[clave];
-        if (v1 === undefined || v2 === undefined) continue;
-
-        const [min, max] = minMax[clave];
-        const rango = max - min || 1; // evita división por cero
-        const diffRaw = v2 - v1;
-        const diffPct = (Math.abs(diffRaw) / rango) * 100;
-
-        sumaPct += diffPct;
-        contador++;
-
-        detalle.push({ variable: clave, v1, v2, diffRaw, diffPct });
-      }
-
-      const promedio = contador > 0 ? sumaPct / contador : 100;
+      const { promedio, detalle } = compararVariables(actual, p.candles.variables || {}, minMax, true);
       return { punto: p, promedio, detalle };
     });
 
-  candidatos.sort((a, b) => a.promedio - b.promedio);
-  const mejor = candidatos[0];
+  if (candidatos.length === 0) {
+    document.getElementById("cargandoSimilarDetalle").style.display = "none";
+    alert("No hay otros puntos marcados para comparar.");
+    return;
+  }
 
-  mostrarResultadoSimilar(mejor);
+  candidatos.sort((a, b) => a.promedio - b.promedio);
+  mostrarResultadoSimilar(candidatos[0]);
 }
 
 function mostrarResultadoSimilar(mejor) {
@@ -294,7 +351,7 @@ function mostrarResultadoSimilar(mejor) {
   const c = mejor.punto.candles;
   document.getElementById("infoSimilarDetalle").textContent =
     `${c.symbol} ${c.timeframe} — ${c.timestamp.replace("T", " ").slice(0, 16)} | ` +
-    `Tipo: ${mejor.punto.tipo.toUpperCase()}` +
+    `Tipo: ${String(mejor.punto.tipo || "").toUpperCase()}` +
     (mejor.punto.nota ? ` | Nota: ${mejor.punto.nota}` : "");
 
   document.getElementById("porcentajeTotalDetalle").textContent =
@@ -323,16 +380,23 @@ function mostrarResultadoSimilar(mejor) {
   }
 }
 
+// Con el marcado automático la lista puede tener cientos de puntos: los conteos
+// incluyen TODOS, pero en pantalla se dibujan solo los más recientes.
+const MAX_PUNTOS_EN_LISTA = 200;
+
 async function verPuntosMarcados() {
   const contenedor = document.getElementById("puntosContenedor");
   const listaPuntos = document.getElementById("listaPuntos");
 
-  const { data: puntos, error } = await supabaseClient
-    .from("points")
-    .select("id, tipo, direccion, nota, resultado, candles(id, symbol, timeframe, timestamp, close)")
-    .order("id", { ascending: false });
-
-  if (error) {
+  let puntos;
+  try {
+    puntos = await traerPaginado(() =>
+      supabaseClient
+        .from("points")
+        .select("id, tipo, direccion, nota, resultado, candles(id, symbol, timeframe, timestamp, close)")
+        .order("id", { ascending: false })
+    );
+  } catch (error) {
     alert("Error trayendo los puntos: " + error.message);
     return;
   }
@@ -340,9 +404,18 @@ async function verPuntosMarcados() {
   const conteo = { exitoso: 0, fallido: 0, pendiente: 0 };
   contenedor.innerHTML = "";
 
-  for (const p of puntos) {
+  if (puntos.length > MAX_PUNTOS_EN_LISTA) {
+    const aviso = document.createElement("p");
+    aviso.className = "msg msg-loading";
+    aviso.textContent = `Mostrando los ${MAX_PUNTOS_EN_LISTA} más recientes de ${puntos.length}.`;
+    contenedor.appendChild(aviso);
+  }
+
+  puntos.forEach((p, indice) => {
     const resultado = p.resultado || "pendiente";
     conteo[resultado] = (conteo[resultado] || 0) + 1;
+
+    if (indice >= MAX_PUNTOS_EN_LISTA) return;
 
     const c = p.candles;
     const fila = document.createElement("div");
@@ -352,14 +425,16 @@ async function verPuntosMarcados() {
     fila.dataset.resultado = resultado;
 
     const fechaTexto = c ? c.timestamp.replace("T", " ").slice(0, 16) : "vela no encontrada";
+    // O = bueno, X = malo (marcados a mano), A = punto automático
+    const marca = p.tipo === "bueno" ? "O" : p.tipo === "malo" ? "X" : "A";
 
     fila.innerHTML = `
-      <span class="punto-badge">${p.direccion ? p.direccion.toUpperCase() : "?"} ${p.tipo === "bueno" ? "O" : p.tipo === "malo" ? "X" : "?"}</span>
+      <span class="punto-badge">${p.direccion ? p.direccion.toUpperCase() : "?"} ${marca}</span>
       <span class="punto-fecha">${c ? c.symbol + " " + c.timeframe : ""} — ${fechaTexto}</span>
       <span class="punto-resultado">${resultado}</span>
     `;
     contenedor.appendChild(fila);
-  }
+  });
 
   document.getElementById("totalExitosos").textContent = conteo.exitoso;
   document.getElementById("totalFallidos").textContent = conteo.fallido;
@@ -396,8 +471,12 @@ async function verDetallePunto(candleId, resultado, modoMarcar = false) {
   document.getElementById("comparacionContainer").style.display = "none";
   document.getElementById("resultadoSimilaresGlobal").style.display = "none";
 
+  // El estado (BUY/SELL + exitoso/fallido/pendiente) se lee SIEMPRE de la base
+  // de datos, también cuando se llega desde "Buscar vela".
+  const estado = await textoEstadoDeVela(data.id);
+
   document.getElementById("infoVelaDetalle").textContent =
-    `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ${resultado || "sin evaluar"}`;
+    `${data.symbol} ${data.timeframe} — ${data.timestamp.replace("T", " ").slice(0, 16)} | ${estado}`;
 
   document.getElementById("paginaDetalle").classList.add("abierto");
 
@@ -689,72 +768,42 @@ async function buscarSimilaresGlobal() {
   document.getElementById("cargandoSimilaresGlobal").style.display = "block";
   document.getElementById("resultadoSimilaresGlobal").style.display = "none";
 
-  const { data: todasLasVelas, error: errorVelas } = await supabaseClient
-    .from("candles")
-    .select("variables")
-    .eq("symbol", velaDetalleActual.symbol)
-    .eq("timeframe", velaDetalleActual.timeframe);
+  let candidatas, puntosExistentes;
+  try {
+    // Una sola descarga (paginada) de las velas del mismo símbolo/timeframe:
+    // sirve para calcular los rangos de normalización y para comparar.
+    candidatas = await traerPaginado(() =>
+      supabaseClient
+        .from("candles")
+        .select("id, symbol, timeframe, timestamp, variables")
+        .eq("symbol", velaDetalleActual.symbol)
+        .eq("timeframe", velaDetalleActual.timeframe)
+        .order("timestamp", { ascending: true })
+    );
 
-  if (errorVelas) {
-    alert("Error trayendo velas para normalizar: " + errorVelas.message);
+    // Resultado (si existe) de los puntos ya marcados para estas velas
+    puntosExistentes = await traerPaginado(() =>
+      supabaseClient
+        .from("points")
+        .select("id, candle_id, resultado, candles!inner(symbol, timeframe)")
+        .eq("candles.symbol", velaDetalleActual.symbol)
+        .eq("candles.timeframe", velaDetalleActual.timeframe)
+        .order("id", { ascending: true })
+    );
+  } catch (error) {
+    document.getElementById("cargandoSimilaresGlobal").style.display = "none";
+    alert("Error trayendo datos para comparar: " + error.message);
     return;
   }
 
-  const minMax = {};
-  for (const fila of todasLasVelas) {
-    for (const [clave, valor] of Object.entries(fila.variables || {})) {
-      if (valor === null || valor === undefined) continue;
-      if (!minMax[clave]) minMax[clave] = [valor, valor];
-      minMax[clave][0] = Math.min(minMax[clave][0], valor);
-      minMax[clave][1] = Math.max(minMax[clave][1], valor);
-    }
-  }
-
-  const { data: candidatas, error: errorCand } = await supabaseClient
-    .from("candles")
-    .select("id, symbol, timeframe, timestamp, variables")
-    .eq("symbol", velaDetalleActual.symbol)
-    .eq("timeframe", velaDetalleActual.timeframe);
-
-  if (errorCand) {
-    alert("Error trayendo velas candidatas: " + errorCand.message);
-    return;
-  }
-
-  // Traer el resultado (si existe) de los puntos ya marcados para estas velas
-  const { data: puntosExistentes, error: errorPuntosExistentes } = await supabaseClient
-    .from("points")
-    .select("candle_id, resultado, candles!inner(symbol, timeframe)")
-    .eq("candles.symbol", velaDetalleActual.symbol)
-    .eq("candles.timeframe", velaDetalleActual.timeframe);
-
-  if (errorPuntosExistentes) {
-    alert("Error trayendo puntos existentes: " + errorPuntosExistentes.message);
-    return;
-  }
-
-  const resultadoPorCandleId = new Map();
-  for (const p of puntosExistentes) {
-    resultadoPorCandleId.set(p.candle_id, p.resultado || "pendiente");
-  }
-
+  const minMax = calcularMinMax(candidatas);
+  const resultadoPorCandleId = mapaResultadoPorVela(puntosExistentes);
   const actual = velaDetalleActual.variables || {};
 
   const resultados = candidatas
     .filter((c) => c.id !== velaDetalleActual.id)
     .map((c) => {
-      let suma = 0;
-      let contador = 0;
-      for (const clave of Object.keys(minMax)) {
-        const v1 = actual[clave];
-        const v2 = c.variables[clave];
-        if (v1 === undefined || v2 === undefined) continue;
-        const [min, max] = minMax[clave];
-        const rango = max - min || 1;
-        suma += (Math.abs(v2 - v1) / rango) * 100;
-        contador++;
-      }
-      const promedio = contador > 0 ? suma / contador : 100;
+      const { promedio } = compararVariables(actual, c.variables || {}, minMax);
       return { candle: c, promedio, estado: resultadoPorCandleId.get(c.id) || "no evaluado" };
     });
 
@@ -1125,6 +1174,7 @@ document.getElementById("btnSimilarDetalle").addEventListener("click", buscarPun
 // cosa, entrega forex en horario de Sídney (Australia) por defecto — por
 // eso se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
 const HORAS_BROKER_RESPECTO_A_UTC = 3;
+const MS_POR_VELA_M15 = 15 * 60 * 1000;
 
 function ajustarZonaHoraria(datetimeStr, horas) {
   const fecha = new Date(datetimeStr.replace(" ", "T") + "Z"); // Twelve Data ya viene en UTC
@@ -1143,7 +1193,7 @@ async function obtenerVelasTwelveData(apiKey, outputsize = 300) {
   }
 
   // Twelve Data devuelve lo más reciente primero; se invierte para tener orden cronológico.
-  return datos.values
+  const velas = datos.values
     .map((v) => ({
       timestamp: ajustarZonaHoraria(v.datetime, HORAS_BROKER_RESPECTO_A_UTC),
       open: parseFloat(v.open),
@@ -1153,6 +1203,14 @@ async function obtenerVelasTwelveData(apiKey, outputsize = 300) {
       volume: v.volume ? parseFloat(v.volume) : 0,
     }))
     .reverse();
+
+  // La última fila de Twelve Data es la vela que todavía se está formando
+  // (OHLC parcial). Se descarta: solo se usan velas ya cerradas.
+  const ahoraBroker = Date.now() + HORAS_BROKER_RESPECTO_A_UTC * 3600 * 1000;
+  return velas.filter((v) => {
+    const inicio = new Date(v.timestamp.replace(" ", "T") + "Z").getTime(); // hora del bróker tratada como UTC
+    return inicio + MS_POR_VELA_M15 <= ahoraBroker;
+  });
 }
 
 // EMA de toda la serie (con "null" mientras no hay suficientes datos para empezar).
@@ -1495,63 +1553,32 @@ async function calcularYBuscarSimilar() {
 
   mensaje.textContent = "Buscando puntos parecidos…";
 
-  const { data: todasLasVelas, error: errorVelas } = await supabaseClient
-    .from("candles")
-    .select("variables");
+  let candidatas, puntosExistentes;
+  try {
+    // Una sola descarga (paginada) de todas las velas: sirve para calcular los
+    // rangos de normalización y para comparar.
+    candidatas = await traerPaginado(() =>
+      supabaseClient
+        .from("candles")
+        .select("id, symbol, timeframe, timestamp, variables")
+        .order("id", { ascending: true })
+    );
 
-  if (errorVelas) {
-    mensaje.textContent = "Error trayendo velas para normalizar: " + errorVelas.message;
+    // Resultado (si existe) de los puntos ya marcados, para mostrar si cada
+    // vela parecida fue exitosa, fallida, o todavía no se evaluó.
+    puntosExistentes = await traerPaginado(() =>
+      supabaseClient.from("points").select("id, candle_id, resultado").order("id", { ascending: true })
+    );
+  } catch (error) {
+    mensaje.textContent = "Error trayendo datos para comparar: " + error.message;
     return;
   }
 
-  const minMax = {};
-  for (const fila of todasLasVelas) {
-    for (const [clave, valor] of Object.entries(fila.variables || {})) {
-      if (valor === null || valor === undefined) continue;
-      if (!minMax[clave]) minMax[clave] = [valor, valor];
-      minMax[clave][0] = Math.min(minMax[clave][0], valor);
-      minMax[clave][1] = Math.max(minMax[clave][1], valor);
-    }
-  }
+  const minMax = calcularMinMax(candidatas);
+  const resultadoPorCandleId = mapaResultadoPorVela(puntosExistentes);
 
-  const { data: candidatas, error: errorCand } = await supabaseClient
-    .from("candles")
-    .select("id, symbol, timeframe, timestamp, variables");
-
-  if (errorCand) {
-    mensaje.textContent = "Error trayendo velas: " + errorCand.message;
-    return;
-  }
-
-  // Resultado (si existe) de los puntos ya marcados, para mostrar si cada
-  // vela parecida fue exitosa, fallida, o todavía no se evaluó.
-  const { data: puntosExistentes, error: errorPuntos } = await supabaseClient
-    .from("points")
-    .select("candle_id, resultado");
-
-  if (errorPuntos) {
-    mensaje.textContent = "Error trayendo puntos: " + errorPuntos.message;
-    return;
-  }
-
-  const resultadoPorCandleId = new Map();
-  for (const p of puntosExistentes) {
-    resultadoPorCandleId.set(p.candle_id, p.resultado || "pendiente");
-  }
-
-  const resultados = (candidatas || []).map((c) => {
-    let suma = 0;
-    let contador = 0;
-    for (const clave of Object.keys(minMax)) {
-      const v1 = variablesCompletas[clave];
-      const v2 = c.variables[clave];
-      if (v1 === undefined || v2 === undefined) continue;
-      const [min, max] = minMax[clave];
-      const rango = max - min || 1;
-      suma += (Math.abs(v2 - v1) / rango) * 100;
-      contador++;
-    }
-    const promedio = contador > 0 ? suma / contador : 100;
+  const resultados = candidatas.map((c) => {
+    const { promedio } = compararVariables(variablesCompletas, c.variables || {}, minMax);
     return { candle: c, promedio, estado: resultadoPorCandleId.get(c.id) || "no evaluado" };
   });
 
