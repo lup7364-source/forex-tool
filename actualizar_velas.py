@@ -1,62 +1,68 @@
 """
-Trae las velas nuevas de AUDUSD M15 desde Twelve Data y las sube a Supabase,
+Trae las velas CERRADAS de AUDUSD M15 desde Twelve Data y las sube a Supabase,
 calculando los indicadores en continuidad con el historial que ya tienes
 (ATR, EMA_21 y SMMA_21/50/200 no se reinician: siguen la misma fórmula
-recursiva a partir del último valor real que ya calculó MT4).
+recursiva a partir del último valor guardado).
 
-Si la última vela guardada es de hace días, esta primera corrida rellena
-automáticamente todo el hueco hasta ahora (no hace falta un script aparte
-para el backfill: es el mismo).
+Cambios importantes respecto a la versión anterior:
+  * Twelve Data devuelve como última fila la vela que todavía se está
+    formando (con OHLC parcial). Ahora esa vela se descarta: solo se suben
+    velas ya cerradas.
+  * Si la vela recién cerrada todavía no aparece en Twelve Data, se reintenta
+    unas veces (cada 20 s) antes de rendirse hasta la siguiente corrida.
+  * Si la última vela guardada tiene datos distintos a los que Twelve Data
+    tiene ahora (por ejemplo, se guardó parcial), se recalcula sola.
+  * Modo reparación: reescribe todas las velas desde una fecha. Sirve para
+    arreglar las velas que quedaron guardadas parciales antes de este cambio.
+
+Uso normal (lo hace el workflow cada 15 min):
+    python actualizar_velas.py
+
+Reparar desde una fecha (hora del bróker, UTC+3):
+    python actualizar_velas.py --reparar-desde "2026-09-20 00:00"
+    (también se puede pasar con la variable de entorno REPARAR_DESDE)
 
 Requiere:
-    pip install supabase python-dotenv requests
+    pip install requests python-dotenv
 
 Variables de entorno (archivo .env):
     SUPABASE_URL=...
     SUPABASE_SERVICE_ROLE_KEY=...
     TWELVE_DATA_API_KEY=...
-
-Uso:
-    python actualizar_velas.py
 """
 
+import argparse
 import os
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv
-from supabase import create_client
+
+import supabase_rest as db
 
 SYMBOL = "AUDUSD"
 TIMEFRAME = "M15"
 TWELVE_DATA_SYMBOL = "AUD/USD"
 TWELVE_DATA_INTERVAL = "15min"
+MINUTOS_POR_VELA = 15
 
 HISTORIAL_PARA_CONTEXTO = 250  # velas previas que se traen de Supabase, para
                                 # dar contexto a RSI/MACD (no para reiniciar
                                 # SMMA/EMA/ATR: esos continúan del último valor real)
 
+# Tu MT4/TradingView trabajan en UTC+3. Twelve Data, si no se le pide otra
+# cosa, entrega forex en horario de Sídney (Australia) por defecto — por eso
+# se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
+HORAS_BROKER_RESPECTO_A_UTC = 3
 
-def cargar_config():
-    load_dotenv()
-    return {
-        "supabase_url": os.environ["SUPABASE_URL"],
-        "supabase_key": os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-        "twelve_data_key": os.environ["TWELVE_DATA_API_KEY"],
-    }
+INTENTOS_ESPERANDO_VELA = 3
+SEGUNDOS_ENTRE_INTENTOS = 20
 
 
-def traer_ultimas_velas_supabase(cliente, cuantas=HISTORIAL_PARA_CONTEXTO):
-    resp = (
-        cliente.table("candles")
-        .select("timestamp, open, high, low, close, volume, variables")
-        .eq("symbol", SYMBOL)
-        .eq("timeframe", TIMEFRAME)
-        .order("timestamp", desc=True)
-        .limit(cuantas)
-        .execute()
-    )
-    return list(reversed(resp.data))  # orden cronológico
+def ahora_en_broker():
+    """Hora actual en el horario del bróker (naive, igual que los timestamps guardados)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=HORAS_BROKER_RESPECTO_A_UTC)
 
 
 def parsear_timestamp(valor):
@@ -66,13 +72,21 @@ def parsear_timestamp(valor):
     return dt.replace(tzinfo=None)
 
 
-# Tu MT4/TradingView trabajan en UTC+3. Twelve Data, si no se le pide otra
-# cosa, entrega forex en horario de Sídney (Australia) por defecto — por eso
-# se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
-HORAS_BROKER_RESPECTO_A_UTC = 3
+def traer_ultimas_velas_supabase(cuantas=HISTORIAL_PARA_CONTEXTO, antes_de=None):
+    params = {
+        "select": "timestamp,open,high,low,close,volume,variables",
+        "symbol": f"eq.{SYMBOL}",
+        "timeframe": f"eq.{TIMEFRAME}",
+        "order": "timestamp.desc",
+        "limit": cuantas,
+    }
+    if antes_de is not None:
+        params["timestamp"] = f"lt.{antes_de.isoformat()}"
+    filas = db.seleccionar("candles", params)
+    return list(reversed(filas))  # orden cronológico
 
 
-def traer_velas_twelve_data(api_key, outputsize=500):
+def traer_velas_twelve_data(api_key, outputsize):
     respuesta = requests.get(
         "https://api.twelvedata.com/time_series",
         params={
@@ -101,6 +115,41 @@ def traer_velas_twelve_data(api_key, outputsize=500):
             "close": float(v["close"]),
             "volume": float(v["volume"]) if v.get("volume") else 0.0,
         })
+    return velas
+
+
+def inicio_ultima_vela_cerrada(ahora):
+    inicio_actual = ahora.replace(
+        minute=(ahora.minute // MINUTOS_POR_VELA) * MINUTOS_POR_VELA, second=0, microsecond=0
+    )
+    return inicio_actual - timedelta(minutes=MINUTOS_POR_VELA)
+
+
+def solo_velas_cerradas(velas, ahora):
+    """Descarta la vela en formación: una vela está cerrada cuando ya pasó su hora de cierre."""
+    return [v for v in velas if v["timestamp"] + timedelta(minutes=MINUTOS_POR_VELA) <= ahora]
+
+
+def traer_velas_cerradas(api_key, outputsize, esperar_vela_nueva=True):
+    """Trae velas de Twelve Data y devuelve solo las cerradas. Si la última vela
+    cerrada esperada todavía no aparece, reintenta unas veces."""
+    velas = []
+    for intento in range(1, INTENTOS_ESPERANDO_VELA + 1):
+        ahora = ahora_en_broker()
+        velas = solo_velas_cerradas(traer_velas_twelve_data(api_key, outputsize), ahora)
+        esperada = inicio_ultima_vela_cerrada(ahora)
+
+        if velas and velas[-1]["timestamp"] >= esperada:
+            return velas
+
+        fin_de_semana = ahora.weekday() >= 5  # el mercado está cerrado: no tiene caso esperar
+        if not esperar_vela_nueva or fin_de_semana or intento == INTENTOS_ESPERANDO_VELA:
+            break
+
+        print(f"Aún no aparece la vela cerrada de las {esperada:%H:%M}; reintento en "
+              f"{SEGUNDOS_ENTRE_INTENTOS} s ({intento}/{INTENTOS_ESPERANDO_VELA})...")
+        time.sleep(SEGUNDOS_ENTRE_INTENTOS)
+
     return velas
 
 
@@ -147,6 +196,8 @@ def calcular_macd(closes, rapida=12, lenta=26, señal=9):
     if not macd_linea:
         return 0.0, 0.0
     señal_serie = ema_serie(macd_linea, señal)
+    if señal_serie[-1] is None:  # aún no hay suficientes velas para la línea de señal
+        return macd_linea[-1], 0.0
     return macd_linea[-1], señal_serie[-1]
 
 
@@ -184,11 +235,8 @@ def calcular_variables_derivadas(open_, high, low, close, bb_up, bb_mid, bb_dw, 
     }
 
 
-def procesar_y_subir(supabase_url, supabase_key, historial, nuevas):
-    if not nuevas:
-        print("No hay velas nuevas que traer. Ya estás al día.")
-        return
-
+def construir_filas(historial, nuevas):
+    """Calcula los indicadores de cada vela nueva, en continuidad con el historial."""
     closes = [h["close"] for h in historial]
 
     ultima = historial[-1] if historial else None
@@ -248,44 +296,91 @@ def procesar_y_subir(supabase_url, supabase_key, historial, nuevas):
         smma21_prev, smma50_prev, smma200_prev = smma21, smma50, smma200
         close_prev = vela["close"]
 
-    respuesta = requests.post(
-        f"{supabase_url}/rest/v1/candles?on_conflict=symbol,timeframe,timestamp",
-        headers={
-            "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-        json=filas,
-        timeout=60,
-    )
-    if respuesta.status_code >= 300:
-        raise RuntimeError(f"Error subiendo velas: {respuesta.status_code} — {respuesta.text}")
+    return filas
 
-    print(f"Listo. {len(filas)} vela(s) nueva(s) subida(s) "
-          f"({filas[0]['timestamp']} -> {filas[-1]['timestamp']}).")
+
+def ohlc_distinto(guardada, de_twelve_data, tolerancia=1e-7):
+    return any(
+        abs(guardada[campo] - de_twelve_data[campo]) > tolerancia
+        for campo in ("open", "high", "low", "close")
+    )
+
+
+def parsear_fecha_reparacion(texto):
+    if not texto:
+        return None
+    for formato in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(texto.strip(), formato)
+        except ValueError:
+            continue
+    raise SystemExit(f"Fecha inválida para --reparar-desde: '{texto}'. Usa 'YYYY-MM-DD HH:MM'.")
 
 
 def main():
-    config = cargar_config()
-    cliente = create_client(config["supabase_url"], config["supabase_key"])
+    load_dotenv()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--reparar-desde",
+        default=os.environ.get("REPARAR_DESDE", ""),
+        help="Reescribe todas las velas desde esta fecha (hora del bróker), ej. '2026-09-20 00:00'",
+    )
+    args = parser.parse_args()
+    reparar_desde = parsear_fecha_reparacion(args.reparar_desde)
+
+    api_key = os.environ["TWELVE_DATA_API_KEY"]
+
+    if reparar_desde:
+        horas_atras = (ahora_en_broker() - reparar_desde).total_seconds() / 3600
+        outputsize = min(5000, int(horas_atras * 4) + 60)
+        print(f"MODO REPARACIÓN desde {reparar_desde:%Y-%m-%d %H:%M} (se piden {outputsize} velas).")
+    else:
+        outputsize = 500
+
+    print("Trayendo velas cerradas de Twelve Data...")
+    velas_td = traer_velas_cerradas(api_key, outputsize, esperar_vela_nueva=not reparar_desde)
+    if not velas_td:
+        print("Twelve Data no devolvió velas cerradas.")
+        return
 
     print("Trayendo historial reciente de Supabase...")
-    historial = traer_ultimas_velas_supabase(cliente)
-    if historial:
-        for h in historial:
-            h["timestamp"] = parsear_timestamp(h["timestamp"])
+    historial = traer_ultimas_velas_supabase(antes_de=reparar_desde)
+    for h in historial:
+        h["timestamp"] = parsear_timestamp(h["timestamp"])
 
-    print("Trayendo velas de Twelve Data...")
-    velas_td = traer_velas_twelve_data(config["twelve_data_key"])
+    if reparar_desde:
+        nuevas = [v for v in velas_td if v["timestamp"] >= reparar_desde]
+        if velas_td[0]["timestamp"] > reparar_desde:
+            print(f"AVISO: Twelve Data solo llega hasta {velas_td[0]['timestamp']:%Y-%m-%d %H:%M}; "
+                  "las velas anteriores a esa fecha no se repararon.")
+    elif historial:
+        # Si la última vela guardada difiere de la versión actual de Twelve Data
+        # (p. ej. se guardó cuando aún estaba abierta), se recalcula.
+        td_por_ts = {v["timestamp"]: v for v in velas_td}
+        ultima = historial[-1]
+        misma = td_por_ts.get(ultima["timestamp"])
+        if misma and len(historial) > 1 and ohlc_distinto(ultima, misma):
+            print(f"La vela {ultima['timestamp']:%Y-%m-%d %H:%M} estaba guardada con datos distintos; se recalcula.")
+            historial.pop()
 
-    if historial:
         ultimo_ts = historial[-1]["timestamp"]
         nuevas = [v for v in velas_td if v["timestamp"] > ultimo_ts]
+
+        if velas_td[0]["timestamp"] > ultimo_ts + timedelta(minutes=MINUTOS_POR_VELA):
+            print("AVISO: puede haber un hueco entre la última vela guardada y las que trae Twelve Data. "
+                  "Si es así, corre el workflow a mano con 'reparar_desde' = fecha de la última vela buena.")
     else:
         nuevas = velas_td  # no hay nada guardado todavía: sube todo lo que trajo Twelve Data
 
-    procesar_y_subir(config["supabase_url"], config["supabase_key"], historial, nuevas)
+    if not nuevas:
+        print("No hay velas nuevas que subir. Ya estás al día.")
+        return
+
+    filas = construir_filas(historial, nuevas)
+    db.insertar("candles", filas, on_conflict="symbol,timeframe,timestamp")
+
+    print(f"Listo. {len(filas)} vela(s) subida(s) ({filas[0]['timestamp']} -> {filas[-1]['timestamp']}).")
 
 
 if __name__ == "__main__":
