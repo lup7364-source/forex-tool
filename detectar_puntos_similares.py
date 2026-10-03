@@ -1,5 +1,5 @@
 """
-Revisa las velas nuevas de AUDUSD M15 y detecta si cumplen EXACTAMENTE la
+Detecta, en las velas de AUDUSD M15, los puntos que cumplen EXACTAMENTE la
 misma condición que tu indicador de TradingView (V01.pine):
 
   BULL POINT = el precio cruza HACIA ARRIBA la banda inferior de Bollinger
@@ -8,65 +8,81 @@ misma condición que tu indicador de TradingView (V01.pine):
   BEAR POINT = el precio cruza HACIA ABAJO la banda superior de Bollinger
                Y el RSI está bajando (comparado con la vela anterior)
 
-En cuanto detecta una de las dos, manda el aviso a Telegram al instante
-(no espera a saber si a futuro seria exitoso o fallido).
+Qué hace con cada punto detectado:
+  1. Lo GUARDA en la tabla `points` (tipo "auto", con su dirección buy/sell).
+     Después evaluar_resultados.py lo marca como exitoso/fallido al revisar
+     si el precio tocó primero el TP o el SL.
+  2. Manda el aviso a Telegram, pero solo si la vela es reciente (para no
+     llenarte de avisos por velas viejas).
 
-Antes de usarlo, corre UNA VEZ en el SQL Editor de Supabase:
+Uso normal (lo hace el workflow cada 15 min): revisa las velas con
+notificado = false.
+    python detectar_puntos_similares.py
+
+Uso único para rellenar TODO el historial (marca los puntos de todas las
+velas guardadas que aún no estén en `points`, sin mandar avisos):
+    python detectar_puntos_similares.py --reprocesar
+
+Antes de usarlo, corre UNA VEZ en el SQL Editor de Supabase (por si la
+columna "tipo" de points solo acepta bueno/malo):
+    alter table points drop constraint if exists points_tipo_check;
     alter table candles add column if not exists notificado boolean default false;
 
 Requiere:
-    pip install supabase python-dotenv requests
+    pip install requests python-dotenv
 
-Variables de entorno (además de las que ya tienes):
+Variables de entorno (además de las de Supabase):
     TELEGRAM_BOT_TOKEN=...
     TELEGRAM_CHAT_ID=...
-
-Uso:
-    python detectar_puntos_similares.py
 """
 
+import argparse
 import os
+import sys
+from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv
-from supabase import create_client
+
+import supabase_rest as db
 
 SYMBOL = "AUDUSD"
 TIMEFRAME = "M15"
 
+TIPO_PUNTO_AUTOMATICO = "auto"
+EDAD_MAXIMA_AVISO_MIN = 90  # solo se avisa por Telegram si la vela tiene menos de esto
+HORAS_BROKER_RESPECTO_A_UTC = 3
 
-def cargar_config():
-    load_dotenv()
-    return {
-        "supabase_url": os.environ["SUPABASE_URL"],
-        "supabase_key": os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-        "telegram_token": os.environ["TELEGRAM_BOT_TOKEN"],
-        "telegram_chat_id": os.environ["TELEGRAM_CHAT_ID"],
-    }
+COLUMNAS_VELA = "id,timestamp,close,notificado,variables"
 
 
-def enviar_telegram(token, chat_id, texto):
-    respuesta = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": texto},
-        timeout=15,
-    )
+def ahora_en_broker():
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=HORAS_BROKER_RESPECTO_A_UTC)
+
+
+def parsear_timestamp(valor):
+    dt = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    return dt.replace(tzinfo=None)
+
+
+def enviar_telegram(texto):
+    """Devuelve True si el mensaje salió bien."""
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    try:
+        respuesta = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": texto},
+            timeout=15,
+        )
+    except requests.RequestException as error:
+        print(f"Aviso: no se pudo enviar el mensaje a Telegram: {error}")
+        return False
+
     if respuesta.status_code >= 300:
         print(f"Aviso: no se pudo enviar el mensaje a Telegram: {respuesta.text}")
-
-
-def traer_vela_anterior(cliente, antes_de_timestamp):
-    resp = (
-        cliente.table("candles")
-        .select("timestamp, close, variables")
-        .eq("symbol", SYMBOL)
-        .eq("timeframe", TIMEFRAME)
-        .lt("timestamp", antes_de_timestamp)
-        .order("timestamp", desc=True)
-        .limit(1)
-        .execute()
-    )
-    return resp.data[0] if resp.data else None
+        return False
+    return True
 
 
 def detectar_punto(vela_actual, vela_anterior):
@@ -104,48 +120,161 @@ def detectar_punto(vela_actual, vela_anterior):
     return None
 
 
-def main():
-    config = cargar_config()
-    cliente = create_client(config["supabase_url"], config["supabase_key"])
+def fila_punto(vela, punto):
+    return {
+        "candle_id": vela["id"],
+        "tipo": TIPO_PUNTO_AUTOMATICO,
+        "direccion": punto["direccion"],
+        "nota": f"AUTO · {punto['tipo']} (V01)",
+    }
 
-    print("Buscando velas sin revisar...")
-    resp = (
-        cliente.table("candles")
-        .select("id, timestamp, close, variables")
-        .eq("symbol", SYMBOL)
-        .eq("timeframe", TIMEFRAME)
-        .eq("notificado", False)
-        .order("timestamp")
-        .execute()
+
+def traer_puntos_existentes():
+    """Conjunto de (candle_id, direccion) que ya están en points (manuales o automáticos)."""
+    filas = db.seleccionar_todo("points", {"select": "id,candle_id,direccion", "order": "id.asc"})
+    return {(p["candle_id"], p["direccion"]) for p in filas}
+
+
+def texto_aviso(vela, punto):
+    emoji = "🟢" if punto["direccion"] == "buy" else "🔴"
+    return (
+        f"{emoji} {punto['tipo']} detectado\n"
+        f"{SYMBOL} {TIMEFRAME} — {vela['timestamp']}\n"
+        f"Entry: {vela['close']:.5f}\n"
+        f"TP: {punto['tp']:.5f}\n"
+        f"SL: {punto['sl']:.5f}\n"
+        f"RSI: {punto['rsi']:.2f}"
     )
-    velas_nuevas = resp.data
 
-    if not velas_nuevas:
+
+def filtros_serie():
+    return {"symbol": f"eq.{SYMBOL}", "timeframe": f"eq.{TIMEFRAME}"}
+
+
+def reprocesar_historial():
+    """Marca como punto TODA vela guardada que cumpla la condición y aún no esté en points."""
+    print("Trayendo todas las velas guardadas...")
+    velas = db.seleccionar_todo(
+        "candles", {"select": COLUMNAS_VELA, **filtros_serie(), "order": "timestamp.asc"}
+    )
+    print(f"{len(velas)} velas cargadas.")
+
+    existentes = traer_puntos_existentes()
+    filas = []
+
+    for i in range(1, len(velas)):
+        punto = detectar_punto(velas[i], velas[i - 1])
+        if not punto:
+            continue
+        clave = (velas[i]["id"], punto["direccion"])
+        if clave in existentes:
+            continue
+        filas.append(fila_punto(velas[i], punto))
+        existentes.add(clave)
+
+    db.insertar("points", filas)
+    print(f"Listo. {len(filas)} punto(s) nuevo(s) guardado(s) en points (sin avisos de Telegram).")
+
+
+def revisar_velas_nuevas():
+    print("Buscando velas sin revisar...")
+    pendientes = db.seleccionar_todo(
+        "candles",
+        {
+            "select": "id,timestamp",
+            **filtros_serie(),
+            "or": "(notificado.is.false,notificado.is.null)",
+            "order": "timestamp.asc",
+        },
+    )
+
+    if not pendientes:
         print("No hay velas nuevas por revisar.")
-        return
+        return True
 
-    print(f"{len(velas_nuevas)} vela(s) por revisar.")
+    print(f"{len(pendientes)} vela(s) por revisar.")
+    primer_ts = pendientes[0]["timestamp"]
 
-    for vela in velas_nuevas:
-        anterior = traer_vela_anterior(cliente, vela["timestamp"])
+    # La vela anterior a la primera pendiente + todas desde ahí: así cada vela
+    # pendiente tiene a su lado la vela previa real de la base de datos.
+    previa = db.seleccionar(
+        "candles",
+        {
+            "select": COLUMNAS_VELA,
+            **filtros_serie(),
+            "timestamp": f"lt.{primer_ts}",
+            "order": "timestamp.desc",
+            "limit": 1,
+        },
+    )
+    ventana = db.seleccionar_todo(
+        "candles",
+        {
+            "select": COLUMNAS_VELA,
+            **filtros_serie(),
+            "timestamp": f"gte.{primer_ts}",
+            "order": "timestamp.asc",
+        },
+    )
+    velas = previa + ventana
+
+    existentes = traer_puntos_existentes()
+    ahora = ahora_en_broker()
+    marcar_revisadas = []
+    todo_bien = True
+
+    for i, vela in enumerate(velas):
+        if vela.get("notificado"):
+            continue  # ya revisada antes (solo está en la lista como contexto)
+
+        anterior = velas[i - 1] if i > 0 else None
         punto = detectar_punto(vela, anterior)
+        aviso_ok = True
 
         if punto:
-            emoji = "🟢" if punto["direccion"] == "buy" else "🔴"
-            texto = (
-                f"{emoji} {punto['tipo']} detectado\n"
-                f"{SYMBOL} {TIMEFRAME} — {vela['timestamp']}\n"
-                f"Entry: {vela['close']:.5f}\n"
-                f"TP: {punto['tp']:.5f}\n"
-                f"SL: {punto['sl']:.5f}\n"
-                f"RSI: {punto['rsi']:.2f}"
-            )
-            enviar_telegram(config["telegram_token"], config["telegram_chat_id"], texto)
-            print(f"Aviso enviado: {punto['tipo']} en {vela['timestamp']}")
+            clave = (vela["id"], punto["direccion"])
+            if clave not in existentes:
+                try:
+                    db.insertar("points", [fila_punto(vela, punto)])
+                    existentes.add(clave)
+                    print(f"Punto guardado: {punto['tipo']} en {vela['timestamp']}")
+                except Exception as error:  # el aviso de Telegram es lo prioritario: se sigue
+                    print(f"ERROR guardando el punto de {vela['timestamp']}: {error}")
+                    todo_bien = False
 
-        cliente.table("candles").update({"notificado": True}).eq("id", vela["id"]).execute()
+            edad = ahora - parsear_timestamp(vela["timestamp"])
+            if edad <= timedelta(minutes=EDAD_MAXIMA_AVISO_MIN):
+                aviso_ok = enviar_telegram(texto_aviso(vela, punto))
+                if aviso_ok:
+                    print(f"Aviso enviado: {punto['tipo']} en {vela['timestamp']}")
+            else:
+                print(f"{punto['tipo']} en {vela['timestamp']} es una vela vieja: se guarda sin aviso.")
 
+        if aviso_ok:
+            marcar_revisadas.append(vela["id"])
+
+    db.actualizar_por_ids("candles", marcar_revisadas, {"notificado": True})
     print("Listo.")
+    return todo_bien
+
+
+def main():
+    load_dotenv()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--reprocesar",
+        action="store_true",
+        help="Marca en points todos los puntos del historial completo (sin avisos).",
+    )
+    args = parser.parse_args()
+
+    if args.reprocesar:
+        reprocesar_historial()
+        return
+
+    if not revisar_velas_nuevas():
+        sys.exit(1)  # que el workflow quede en rojo y te enteres
 
 
 if __name__ == "__main__":
