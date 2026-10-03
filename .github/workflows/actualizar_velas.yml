@@ -2,12 +2,33 @@ name: Actualizar velas AUDUSD
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch: {} # permite correrlo manualmente desde la pestaña Actions
+    # Minutos 2, 17, 32 y 47: 2 minutos DESPUÉS de que cierra cada vela M15,
+    # para que Twelve Data ya tenga la vela completa.
+    - cron: "2,17,32,47 * * * *"
+  workflow_dispatch: # permite correrlo manualmente desde la pestaña Actions
+    inputs:
+      reparar_desde:
+        description: "REPARAR velas desde esta fecha (hora del bróker, ej. 2026-09-20 00:00). Dejar vacío en uso normal."
+        required: false
+        default: ""
+      reprocesar_historico:
+        description: "Marcar automáticamente TODO el historial en points (usar una sola vez)"
+        type: boolean
+        required: false
+        default: false
+
+# Evita que dos corridas se pisen entre sí
+concurrency:
+  group: actualizar-velas
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   actualizar:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Clonar repositorio
         uses: actions/checkout@v4
@@ -16,6 +37,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Instalar dependencias
         run: pip install -r requirements.txt
@@ -25,18 +47,29 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          REPARAR_DESDE: ${{ inputs.reparar_desde }}
         run: python actualizar_velas.py
 
-      - name: Ejecutar evaluar_resultados.py
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python evaluar_resultados.py AUDUSD M15
-
+      # Detecta los puntos de V01, los guarda en la tabla points y avisa por Telegram.
+      # Va ANTES de evaluar_resultados para que los puntos nuevos se evalúen en la misma corrida.
       - name: Ejecutar detectar_puntos_similares.py
+        if: ${{ !cancelled() }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python detectar_puntos_similares.py
+          REPROCESAR_HISTORICO: ${{ inputs.reprocesar_historico }}
+        run: |
+          if [ "$REPROCESAR_HISTORICO" = "true" ]; then
+            python detectar_puntos_similares.py --reprocesar
+          else
+            python detectar_puntos_similares.py
+          fi
+
+      - name: Ejecutar evaluar_resultados.py
+        if: ${{ !cancelled() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python evaluar_resultados.py AUDUSD M15
