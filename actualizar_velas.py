@@ -309,9 +309,14 @@ def ohlc_distinto(guardada, de_twelve_data, tolerancia=1e-7):
 def parsear_fecha_reparacion(texto):
     if not texto:
         return None
-    for formato in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+    # Acepta con o sin segundos, con espacio o con "T", y descarta la zona horaria si viene (+00, Z...)
+    limpio = texto.strip().replace("T", " ")
+    for corte in ("+", "Z"):
+        limpio = limpio.split(corte)[0]
+    limpio = limpio.strip()
+    for formato in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            return datetime.strptime(texto.strip(), formato)
+            return datetime.strptime(limpio, formato)
         except ValueError:
             continue
     raise SystemExit(f"Fecha inválida para --reparar-desde: '{texto}'. Usa 'YYYY-MM-DD HH:MM'.")
