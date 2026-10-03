@@ -4,48 +4,21 @@ a partir de las bandas de Bollinger de su propia vela, revisando las velas
 futuras para ver si tocó primero el Take Profit (exitoso) o el Stop Loss
 (fallido). Guarda el resultado en points.resultado.
 
+Solo revisa los puntos que todavía no tienen resultado (o están "pendiente"),
+y solo trae las velas desde el punto más antiguo por resolver.
+
 Requiere:
-    pip install supabase python-dotenv
+    pip install requests python-dotenv
 
 Uso:
     python evaluar_resultados.py AUDUSD M15
 """
 
 import sys
-import os
-from dotenv import load_dotenv
-from supabase import create_client
+
+import supabase_rest as db
 
 MAX_VELAS_ADELANTE = 200
-
-
-def cargar_cliente():
-    load_dotenv()
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    return create_client(url, key)
-
-
-def traer_velas(cliente, symbol, timeframe):
-    todas = []
-    desde = 0
-    tamano_pagina = 1000
-    while True:
-        resp = (
-            cliente.table("candles")
-            .select("id, timestamp, open, high, low, close, variables")
-            .eq("symbol", symbol)
-            .eq("timeframe", timeframe)
-            .order("timestamp")
-            .range(desde, desde + tamano_pagina - 1)
-            .execute()
-        )
-        lote = resp.data
-        todas.extend(lote)
-        if len(lote) < tamano_pagina:
-            break
-        desde += tamano_pagina
-    return todas
 
 
 def calcular_tp_sl(direccion, vela):
@@ -83,40 +56,67 @@ def simular_resultado(direccion, tp, sl, velas_futuras):
 
 
 def evaluar(symbol, timeframe):
-    cliente = cargar_cliente()
+    print("Trayendo puntos sin resolver...")
+    puntos = db.seleccionar_todo(
+        "points",
+        {
+            "select": "id,candle_id,direccion,resultado,candles(id,symbol,timeframe,timestamp)",
+            "or": "(resultado.is.null,resultado.eq.pendiente)",
+            "order": "id.asc",
+        },
+    )
+    puntos = [
+        p for p in puntos
+        if p.get("candles")
+        and p["candles"]["symbol"] == symbol
+        and p["candles"]["timeframe"] == timeframe
+    ]
+    print(f"{len(puntos)} punto(s) por evaluar.")
+    if not puntos:
+        return
+
+    desde = min(p["candles"]["timestamp"] for p in puntos)
 
     print("Trayendo velas...")
-    velas = traer_velas(cliente, symbol, timeframe)
+    velas = db.seleccionar_todo(
+        "candles",
+        {
+            "select": "id,timestamp,open,high,low,close,variables",
+            "symbol": f"eq.{symbol}",
+            "timeframe": f"eq.{timeframe}",
+            "timestamp": f"gte.{desde}",
+            "order": "timestamp.asc",
+        },
+    )
     indice_por_id = {v["id"]: i for i, v in enumerate(velas)}
     print(f"{len(velas)} velas cargadas.")
 
-    print("Trayendo puntos marcados...")
-    puntos = (
-        cliente.table("points")
-        .select("id, candle_id, direccion")
-        .execute()
-        .data
-    )
-    print(f"{len(puntos)} puntos encontrados.")
+    ids_por_resultado = {"exitoso": [], "fallido": []}
 
-    actualizados = 0
     for punto in puntos:
         i = indice_por_id.get(punto["candle_id"])
         if i is None:
-            continue  # la vela de ese punto no es de este symbol/timeframe
+            continue
 
         vela = velas[i]
+        if not vela.get("variables") or "BB_UP" not in vela["variables"]:
+            continue
+
         tp, sl = calcular_tp_sl(punto["direccion"], vela)
         futuras = velas[i + 1 : i + 1 + MAX_VELAS_ADELANTE]
         resultado = simular_resultado(punto["direccion"], tp, sl, futuras)
 
-        if resultado is None:
-            continue  # ambiguo, se deja como estaba
+        if resultado in ids_por_resultado:
+            ids_por_resultado[resultado].append(punto["id"])
+        # "pendiente" y ambiguo (None) se dejan como estaban: se reintentan en la próxima corrida
 
-        cliente.table("points").update({"resultado": resultado}).eq("id", punto["id"]).execute()
-        actualizados += 1
+    for resultado, ids in ids_por_resultado.items():
+        db.actualizar_por_ids("points", ids, {"resultado": resultado})
 
-    print(f"Listo. {actualizados} puntos actualizados.")
+    print(
+        f"Listo. {len(ids_por_resultado['exitoso'])} exitoso(s), "
+        f"{len(ids_por_resultado['fallido'])} fallido(s) nuevos."
+    )
 
 
 if __name__ == "__main__":
