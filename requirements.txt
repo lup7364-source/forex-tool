@@ -1,3 +1,2 @@
-supabase
-python-dotenv
 requests
+python-dotenv
