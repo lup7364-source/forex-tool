@@ -135,14 +135,26 @@ def traer_puntos_existentes():
     return {(p["candle_id"], p["direccion"]) for p in filas}
 
 
+def pip_size():
+    # Pares con JPY: 1 pip = 0.01. El resto (AUDUSD, etc.): 0.0001
+    return 0.01 if "JPY" in SYMBOL.upper() else 0.0001
+
+
 def texto_aviso(vela, punto):
     emoji = "🟢" if punto["direccion"] == "buy" else "🔴"
+    pip = pip_size()
+    etp = abs(vela["close"] - punto["tp"]) / pip  # expected TP en pips
+    esl = abs(vela["close"] - punto["sl"]) / pip  # expected SL en pips
+    fecha = str(vela["timestamp"])[:10]  # solo AAAA-MM-DD
+
     return (
         f"{emoji} {punto['tipo']} detectado\n"
-        f"{SYMBOL} {TIMEFRAME} — {vela['timestamp']}\n"
+        f"{SYMBOL} {TIMEFRAME} — {fecha}\n"
         f"Entry: {vela['close']:.5f}\n"
         f"TP: {punto['tp']:.5f}\n"
         f"SL: {punto['sl']:.5f}\n"
+        f"ETP: {etp:.1f} pips\n"
+        f"ESL: {esl:.1f} pips\n"
         f"RSI: {punto['rsi']:.2f}"
     )
 
