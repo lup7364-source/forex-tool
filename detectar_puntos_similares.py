@@ -145,11 +145,12 @@ def texto_aviso(vela, punto):
     pip = pip_size()
     etp = abs(vela["close"] - punto["tp"]) / pip  # expected TP en pips
     esl = abs(vela["close"] - punto["sl"]) / pip  # expected SL en pips
-    fecha = str(vela["timestamp"])[:10]  # solo AAAA-MM-DD
+    # AAAA-MM-DD HH:MM (24 h, sin segundos), en la hora del bróker
+    fecha_hora = parsear_timestamp(vela["timestamp"]).strftime("%Y-%m-%d %H:%M")
 
     return (
         f"{emoji} {punto['tipo']} detectado\n"
-        f"{SYMBOL} {TIMEFRAME} — {fecha}\n"
+        f"{SYMBOL} {TIMEFRAME} — {fecha_hora}\n"
         f"Entry: {vela['close']:.5f}\n"
         f"TP: {punto['tp']:.5f}\n"
         f"SL: {punto['sl']:.5f}\n"
