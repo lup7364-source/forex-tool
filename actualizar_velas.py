@@ -14,12 +14,14 @@ Cambios importantes respecto a la versión anterior:
     tiene ahora (por ejemplo, se guardó parcial), se recalcula sola.
   * Modo reparación: reescribe todas las velas desde una fecha. Sirve para
     arreglar las velas que quedaron guardadas parciales antes de este cambio.
+  * La hora del bróker ya no es fija: se calcula con horario_broker.py
+    (UTC+3 en verano de EE. UU., UTC+2 en invierno).
 
 Uso normal (lo hace el workflow cada 15 min):
     python actualizar_velas.py
 
-Reparar desde una fecha (hora del bróker, UTC+3):
-    python actualizar_velas.py --reparar-desde "2026-09-20 00:00"
+Reparar desde una fecha (hora del bróker):
+    python actualizar_velas.py --reparar-desde "2026-10-25 00:00"
     (también se puede pasar con la variable de entorno REPARAR_DESDE)
 
 Requiere:
@@ -40,6 +42,7 @@ import requests
 from dotenv import load_dotenv
 
 import supabase_rest as db
+from horario_broker import utc_a_broker
 
 SYMBOL = "AUDUSD"
 TIMEFRAME = "M15"
@@ -51,10 +54,9 @@ HISTORIAL_PARA_CONTEXTO = 250  # velas previas que se traen de Supabase, para
                                 # dar contexto a RSI/MACD (no para reiniciar
                                 # SMMA/EMA/ATR: esos continúan del último valor real)
 
-# Tu MT4/TradingView trabajan en UTC+3. Twelve Data, si no se le pide otra
-# cosa, entrega forex en horario de Sídney (Australia) por defecto — por eso
-# se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
-HORAS_BROKER_RESPECTO_A_UTC = 3
+# Twelve Data, si no se le pide otra cosa, entrega forex en horario de Sídney
+# (Australia) por defecto — por eso se pide explícitamente "UTC" y luego se
+# convierte a la hora de tu bróker con utc_a_broker() (UTC+2 / UTC+3).
 
 INTENTOS_ESPERANDO_VELA = 3
 SEGUNDOS_ENTRE_INTENTOS = 20
@@ -62,7 +64,7 @@ SEGUNDOS_ENTRE_INTENTOS = 20
 
 def ahora_en_broker():
     """Hora actual en el horario del bróker (naive, igual que los timestamps guardados)."""
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=HORAS_BROKER_RESPECTO_A_UTC)
+    return utc_a_broker(datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 def parsear_timestamp(valor):
@@ -106,7 +108,7 @@ def traer_velas_twelve_data(api_key, outputsize):
     velas = []
     for v in reversed(datos["values"]):  # Twelve Data da lo más reciente primero
         ts_utc = datetime.strptime(v["datetime"], "%Y-%m-%d %H:%M:%S")
-        ts_broker = ts_utc + timedelta(hours=HORAS_BROKER_RESPECTO_A_UTC)
+        ts_broker = utc_a_broker(ts_utc)
         velas.append({
             "timestamp": ts_broker,
             "open": float(v["open"]),
@@ -329,7 +331,7 @@ def main():
     parser.add_argument(
         "--reparar-desde",
         default=os.environ.get("REPARAR_DESDE", ""),
-        help="Reescribe todas las velas desde esta fecha (hora del bróker), ej. '2026-09-20 00:00'",
+        help="Reescribe todas las velas desde esta fecha (hora del bróker), ej. '2026-10-25 00:00'",
     )
     args = parser.parse_args()
     reparar_desde = parsear_fecha_reparacion(args.reparar_desde)
