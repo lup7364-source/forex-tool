@@ -16,12 +16,16 @@ Cambios importantes respecto a la versión anterior:
     arreglar las velas que quedaron guardadas parciales antes de este cambio.
   * La hora del bróker ya no es fija: se calcula con horario_broker.py
     (UTC+3 en verano de EE. UU., UTC+2 en invierno).
+  * Twelve Data entrega velas también el sábado y el domingo, cuando el mercado
+    está cerrado y MT4 no las tiene. Se descartan (sábado/domingo en hora del bróker).
+  * El modo reparación pide el historial por tramos (Twelve Data da máx. 5000 velas
+    por consulta), así que puede reparar rangos largos.
 
 Uso normal (lo hace el workflow cada 15 min):
     python actualizar_velas.py
 
 Reparar desde una fecha (hora del bróker):
-    python actualizar_velas.py --reparar-desde "2026-10-25 00:00"
+    python actualizar_velas.py --reparar-desde "2026-09-26 00:00"
     (también se puede pasar con la variable de entorno REPARAR_DESDE)
 
 Requiere:
@@ -60,6 +64,9 @@ HISTORIAL_PARA_CONTEXTO = 250  # velas previas que se traen de Supabase, para
 
 INTENTOS_ESPERANDO_VELA = 3
 SEGUNDOS_ENTRE_INTENTOS = 20
+
+MAX_VELAS_POR_CONSULTA = 5000  # máximo que entrega Twelve Data por consulta
+MAX_TRAMOS_REPARACION = 6      # tope de consultas en modo reparación
 
 
 def ahora_en_broker():
@@ -108,27 +115,74 @@ def quitar_horas_repetidas(velas):
     return list(unicas.values())
 
 
-def traer_velas_twelve_data(api_key, outputsize):
-    respuesta = requests.get(
-        "https://api.twelvedata.com/time_series",
-        params={
-            "symbol": TWELVE_DATA_SYMBOL,
-            "interval": TWELVE_DATA_INTERVAL,
-            "outputsize": outputsize,
-            "timezone": "UTC",
-            "apikey": api_key,
-        },
-        timeout=30,
-    )
+def pedir_valores_twelve_data(api_key, outputsize, end_date=None):
+    """Una consulta a Twelve Data. Devuelve las filas tal cual (lo más reciente primero)."""
+    params = {
+        "symbol": TWELVE_DATA_SYMBOL,
+        "interval": TWELVE_DATA_INTERVAL,
+        "outputsize": outputsize,
+        "timezone": "UTC",
+        "apikey": api_key,
+    }
+    if end_date:
+        params["end_date"] = end_date
+
+    respuesta = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=30)
     datos = respuesta.json()
 
     if datos.get("status") == "error" or "values" not in datos:
         raise RuntimeError(f"Error de Twelve Data: {datos}")
+    return datos["values"]
+
+
+def traer_valores_por_tramos(api_key, desde_broker):
+    """Modo reparación: Twelve Data entrega como máximo 5000 velas por consulta,
+    así que se pide por tramos hacia atrás hasta cubrir la fecha pedida."""
+    por_hora = {}
+    end_date = None
+    anterior = None
+
+    for tramo in range(1, MAX_TRAMOS_REPARACION + 1):
+        try:
+            valores = pedir_valores_twelve_data(api_key, MAX_VELAS_POR_CONSULTA, end_date)
+        except RuntimeError as error:
+            if tramo == 1:
+                raise
+            print(f"AVISO: Twelve Data no entregó más historial: {error}")
+            break
+
+        for v in valores:
+            por_hora[v["datetime"]] = v
+        mas_antigua = min(por_hora)  # "AAAA-MM-DD HH:MM:SS" se ordena bien como texto
+        print(f"Tramo {tramo}: {len(valores)} velas; la más antigua es {mas_antigua} UTC.")
+
+        ya_cubierto = utc_a_broker(datetime.strptime(mas_antigua, "%Y-%m-%d %H:%M:%S")) <= desde_broker
+        if len(valores) < MAX_VELAS_POR_CONSULTA or ya_cubierto or mas_antigua == anterior:
+            break
+        anterior = mas_antigua
+        end_date = mas_antigua
+
+    return sorted(por_hora.values(), key=lambda v: v["datetime"], reverse=True)
+
+
+def traer_velas_twelve_data(api_key, outputsize, desde_broker=None):
+    if desde_broker is None:
+        valores = pedir_valores_twelve_data(api_key, outputsize)
+    else:
+        valores = traer_valores_por_tramos(api_key, desde_broker)
 
     velas = []
-    for v in reversed(datos["values"]):  # Twelve Data da lo más reciente primero
+    omitidas = 0
+    for v in reversed(valores):  # Twelve Data da lo más reciente primero
         ts_utc = datetime.strptime(v["datetime"], "%Y-%m-%d %H:%M:%S")
         ts_broker = utc_a_broker(ts_utc)
+
+        # Sábado y domingo (hora del bróker): el mercado está cerrado. En MT4 no
+        # existen esas velas, así que no se guardan (distorsionarían los indicadores).
+        if ts_broker.weekday() >= 5:
+            omitidas += 1
+            continue
+
         velas.append({
             "timestamp": ts_broker,
             "open": float(v["open"]),
@@ -137,6 +191,9 @@ def traer_velas_twelve_data(api_key, outputsize):
             "close": float(v["close"]),
             "volume": float(v["volume"]) if v.get("volume") else 0.0,
         })
+
+    if omitidas:
+        print(f"Se omitieron {omitidas} vela(s) de sábado/domingo (mercado cerrado).")
     return quitar_horas_repetidas(velas)
 
 
@@ -152,19 +209,21 @@ def solo_velas_cerradas(velas, ahora):
     return [v for v in velas if v["timestamp"] + timedelta(minutes=MINUTOS_POR_VELA) <= ahora]
 
 
-def traer_velas_cerradas(api_key, outputsize, esperar_vela_nueva=True):
+def traer_velas_cerradas(api_key, outputsize, esperar_vela_nueva=True, desde_broker=None):
     """Trae velas de Twelve Data y devuelve solo las cerradas. Si la última vela
     cerrada esperada todavía no aparece, reintenta unas veces."""
     velas = []
     for intento in range(1, INTENTOS_ESPERANDO_VELA + 1):
         ahora = ahora_en_broker()
-        velas = solo_velas_cerradas(traer_velas_twelve_data(api_key, outputsize), ahora)
+        velas = solo_velas_cerradas(traer_velas_twelve_data(api_key, outputsize, desde_broker), ahora)
         esperada = inicio_ultima_vela_cerrada(ahora)
 
         if velas and velas[-1]["timestamp"] >= esperada:
             return velas
 
-        fin_de_semana = ahora.weekday() >= 5  # el mercado está cerrado: no tiene caso esperar
+        # Si es fin de semana, o la vela esperada cae en fin de semana, el mercado
+        # está cerrado: no tiene caso esperar.
+        fin_de_semana = ahora.weekday() >= 5 or esperada.weekday() >= 5
         if not esperar_vela_nueva or fin_de_semana or intento == INTENTOS_ESPERANDO_VELA:
             break
 
@@ -351,7 +410,7 @@ def main():
     parser.add_argument(
         "--reparar-desde",
         default=os.environ.get("REPARAR_DESDE", ""),
-        help="Reescribe todas las velas desde esta fecha (hora del bróker), ej. '2026-10-25 00:00'",
+        help="Reescribe todas las velas desde esta fecha (hora del bróker), ej. '2026-09-26 00:00'",
     )
     args = parser.parse_args()
     reparar_desde = parsear_fecha_reparacion(args.reparar_desde)
@@ -359,14 +418,15 @@ def main():
     api_key = os.environ["TWELVE_DATA_API_KEY"]
 
     if reparar_desde:
-        horas_atras = (ahora_en_broker() - reparar_desde).total_seconds() / 3600
-        outputsize = min(5000, int(horas_atras * 4) + 60)
-        print(f"MODO REPARACIÓN desde {reparar_desde:%Y-%m-%d %H:%M} (se piden {outputsize} velas).")
+        outputsize = MAX_VELAS_POR_CONSULTA
+        print(f"MODO REPARACIÓN desde {reparar_desde:%Y-%m-%d %H:%M} (por tramos de hasta {MAX_VELAS_POR_CONSULTA} velas).")
     else:
         outputsize = 500
 
     print("Trayendo velas cerradas de Twelve Data...")
-    velas_td = traer_velas_cerradas(api_key, outputsize, esperar_vela_nueva=not reparar_desde)
+    velas_td = traer_velas_cerradas(
+        api_key, outputsize, esperar_vela_nueva=not reparar_desde, desde_broker=reparar_desde
+    )
     if not velas_td:
         print("Twelve Data no devolvió velas cerradas.")
         return
