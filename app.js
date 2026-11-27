@@ -1170,15 +1170,32 @@ document.getElementById("btnSimilarDetalle").addEventListener("click", buscarPun
 
 // ---------- Datos en vivo desde Twelve Data (para usar la Calculadora sin estar en la PC con MT4) ----------
 
-// Tu MT4/TradingView trabajan en UTC+3. Twelve Data, si no se le pide otra
-// cosa, entrega forex en horario de Sídney (Australia) por defecto — por
-// eso se pide explícitamente "UTC" y luego se suman las 3 horas de tu bróker.
-const HORAS_BROKER_RESPECTO_A_UTC = 3;
+// Twelve Data, si no se le pide otra cosa, entrega forex en horario de Sídney
+// (Australia) por defecto — por eso se pide explícitamente "UTC" y luego se
+// convierte a la hora de tu bróker (MT4/TradingView): UTC+3 en verano de
+// EE. UU. (del 2.º domingo de marzo al 1.er domingo de noviembre) y UTC+2
+// el resto del año. Misma regla que horario_broker.py.
 const MS_POR_VELA_M15 = 15 * 60 * 1000;
 
-function ajustarZonaHoraria(datetimeStr, horas) {
+// n-ésimo domingo de un mes (mes: 0 = enero ... 11 = diciembre; n = 1 es el primero).
+function domingoN(anio, mes, n) {
+  const primero = new Date(Date.UTC(anio, mes, 1));
+  const dias = (7 - primero.getUTCDay()) % 7;
+  return new Date(Date.UTC(anio, mes, 1 + dias + 7 * (n - 1)));
+}
+
+// Horas que hay que sumar a una fecha UTC para tener la hora del bróker.
+function offsetBrokerHoras(fechaUTC) {
+  const anio = fechaUTC.getUTCFullYear();
+  const inicioVerano = domingoN(anio, 2, 2).getTime() + 7 * 3600 * 1000; // 2:00 EST = 07:00 UTC
+  const finVerano = domingoN(anio, 10, 1).getTime() + 6 * 3600 * 1000;   // 2:00 EDT = 06:00 UTC
+  const t = fechaUTC.getTime();
+  return t >= inicioVerano && t < finVerano ? 3 : 2;
+}
+
+function ajustarZonaHoraria(datetimeStr) {
   const fecha = new Date(datetimeStr.replace(" ", "T") + "Z"); // Twelve Data ya viene en UTC
-  fecha.setUTCHours(fecha.getUTCHours() + horas);
+  fecha.setUTCHours(fecha.getUTCHours() + offsetBrokerHoras(fecha));
   const pad = (n) => String(n).padStart(2, "0");
   return `${fecha.getUTCFullYear()}-${pad(fecha.getUTCMonth() + 1)}-${pad(fecha.getUTCDate())} ${pad(fecha.getUTCHours())}:${pad(fecha.getUTCMinutes())}:${pad(fecha.getUTCSeconds())}`;
 }
@@ -1195,7 +1212,7 @@ async function obtenerVelasTwelveData(apiKey, outputsize = 300) {
   // Twelve Data devuelve lo más reciente primero; se invierte para tener orden cronológico.
   const velas = datos.values
     .map((v) => ({
-      timestamp: ajustarZonaHoraria(v.datetime, HORAS_BROKER_RESPECTO_A_UTC),
+      timestamp: ajustarZonaHoraria(v.datetime),
       open: parseFloat(v.open),
       high: parseFloat(v.high),
       low: parseFloat(v.low),
@@ -1206,7 +1223,7 @@ async function obtenerVelasTwelveData(apiKey, outputsize = 300) {
 
   // La última fila de Twelve Data es la vela que todavía se está formando
   // (OHLC parcial). Se descarta: solo se usan velas ya cerradas.
-  const ahoraBroker = Date.now() + HORAS_BROKER_RESPECTO_A_UTC * 3600 * 1000;
+  const ahoraBroker = Date.now() + offsetBrokerHoras(new Date()) * 3600 * 1000;
   return velas.filter((v) => {
     const inicio = new Date(v.timestamp.replace(" ", "T") + "Z").getTime(); // hora del bróker tratada como UTC
     return inicio + MS_POR_VELA_M15 <= ahoraBroker;
