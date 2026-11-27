@@ -88,6 +88,26 @@ def traer_ultimas_velas_supabase(cuantas=HISTORIAL_PARA_CONTEXTO, antes_de=None)
     return list(reversed(filas))  # orden cronológico
 
 
+def quitar_horas_repetidas(velas):
+    """Si dos filas quedan con la misma hora (repetidas por Twelve Data o por el
+    cambio de horario), se conserva solo la última de cada una. Supabase rechaza
+    un envío donde la misma vela aparece dos veces."""
+    unicas = {}
+    for v in velas:
+        unicas[v["timestamp"]] = v  # conserva la posición de la primera, con los datos de la última
+
+    repetidas = len(velas) - len(unicas)
+    if repetidas:
+        contador = {}
+        for v in velas:
+            contador[v["timestamp"]] = contador.get(v["timestamp"], 0) + 1
+        ejemplos = [f"{ts:%Y-%m-%d %H:%M}" for ts, n in contador.items() if n > 1][:5]
+        print(f"AVISO: {repetidas} vela(s) con hora repetida; se conserva la última de cada una. "
+              f"Ejemplos: {', '.join(ejemplos)}")
+
+    return list(unicas.values())
+
+
 def traer_velas_twelve_data(api_key, outputsize):
     respuesta = requests.get(
         "https://api.twelvedata.com/time_series",
@@ -117,7 +137,7 @@ def traer_velas_twelve_data(api_key, outputsize):
             "close": float(v["close"]),
             "volume": float(v["volume"]) if v.get("volume") else 0.0,
         })
-    return velas
+    return quitar_horas_repetidas(velas)
 
 
 def inicio_ultima_vela_cerrada(ahora):
