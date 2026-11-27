@@ -45,19 +45,20 @@ import requests
 from dotenv import load_dotenv
 
 import supabase_rest as db
+from horario_broker import utc_a_broker
 
 SYMBOL = "AUDUSD"
 TIMEFRAME = "M15"
 
 TIPO_PUNTO_AUTOMATICO = "auto"
 EDAD_MAXIMA_AVISO_MIN = 90  # solo se avisa por Telegram si la vela tiene menos de esto
-HORAS_BROKER_RESPECTO_A_UTC = 3
 
 COLUMNAS_VELA = "id,timestamp,close,notificado,variables"
 
 
 def ahora_en_broker():
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=HORAS_BROKER_RESPECTO_A_UTC)
+    # Hora del bróker según horario_broker.py (UTC+3 en verano de EE. UU., UTC+2 en invierno)
+    return utc_a_broker(datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 def parsear_timestamp(valor):
